@@ -11,6 +11,7 @@ import { profileListHandler } from '../src/commands/profile/list.js';
 import { profileSwitchHandler } from '../src/commands/profile/switch.js';
 import { completionHandler } from '../src/commands/completion.js';
 import { createFactory } from '../src/factory.js';
+import { buildProgram } from '../src/program.js';
 import { ValidationError, AuthError } from '../src/lib/errors.js';
 
 let cfgDir: string;
@@ -171,21 +172,21 @@ describe('config list / profile handlers (temp config)', () => {
 describe('completion handler', () => {
   it('prints a bash completion script', async () => {
     const env = makeFakeFactory();
-    await completionHandler(env.factory, {}, ['bash']);
+    await completionHandler(env.factory, {}, ['bash'], buildProgram);
     expect(env.stdout()).toContain('_n8nctl_complete');
   });
 
   it('prints scripts for zsh, fish, and powershell', async () => {
     for (const shell of ['zsh', 'fish', 'powershell']) {
       const env = makeFakeFactory();
-      await completionHandler(env.factory, {}, [shell]);
+      await completionHandler(env.factory, {}, [shell], buildProgram);
       expect(env.stdout().length).toBeGreaterThan(50);
     }
   });
 
   it('rejects unsupported shells', async () => {
     const env = makeFakeFactory();
-    await expect(completionHandler(env.factory, {}, ['tcsh'])).rejects.toThrow(ValidationError);
+    await expect(completionHandler(env.factory, {}, ['tcsh'], buildProgram)).rejects.toThrow(ValidationError);
   });
 });
 
