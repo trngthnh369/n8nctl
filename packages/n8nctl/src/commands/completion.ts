@@ -14,13 +14,21 @@ interface CommandTree {
 }
 
 /**
+ * Builds the root program. Injected rather than imported: `program.ts` imports
+ * THIS module to register the command, so importing it back — even lazily —
+ * closed a cycle. Under vitest's module runner that cycle intermittently
+ * resolved to a half-initialised namespace, and `buildProgram` came back
+ * undefined mid-suite (see tests/completion.test.ts).
+ */
+type ProgramBuilder = () => Command;
+
+/**
  * Derive the command tree by WALKING the live Commander program instead of
  * hardcoding names. Any command/verb/alias added anywhere is reflected
  * automatically — the previous static lists silently drifted ~half a release
  * behind the real surface.
  */
-async function extractTree(): Promise<CommandTree> {
-  const { buildProgram } = await import('../program.js');
+function extractTree(buildProgram: ProgramBuilder): CommandTree {
   const program = buildProgram();
   const nouns: string[] = [];
   const verbsByNoun = new Map<string, string[]>();
@@ -39,6 +47,7 @@ export async function completionHandler(
   factory: Factory,
   _opts: unknown,
   args: string[],
+  buildProgram: ProgramBuilder,
 ): Promise<void> {
   const [shell] = args;
   if (!SUPPORTED.includes(shell as Shell)) {
@@ -47,15 +56,15 @@ export async function completionHandler(
       `Pick one of: ${SUPPORTED.join(', ')}`,
     );
   }
-  const tree = await extractTree();
+  const tree = extractTree(buildProgram);
   factory.io.stdout.write(generate(shell as Shell, tree));
 }
 
-export function createCompletionCommand(): Command {
+export function createCompletionCommand(buildProgram: ProgramBuilder): Command {
   return new Command('completion')
     .description('Generate a shell completion script (reflects the live command tree)')
     .argument('<shell>', `shell to generate for (${SUPPORTED.join('|')})`)
-    .action(withAction(completionHandler));
+    .action(withAction((factory, opts, args) => completionHandler(factory, opts, args, buildProgram)));
 }
 
 function generate(shell: Shell, tree: CommandTree): string {

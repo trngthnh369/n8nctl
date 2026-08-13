@@ -72,7 +72,7 @@ export function buildProgram(): Command {
   program.addCommand(createCatalogCommand());
   program.addCommand(createAuditCommand());
   program.addCommand(createDoctorCommand());
-  program.addCommand(createCompletionCommand());
+  program.addCommand(createCompletionCommand(buildProgram));
 
   return program;
 }

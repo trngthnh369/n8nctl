@@ -18,7 +18,11 @@ function run(args: string[]): number {
   return r.status ?? -1;
 }
 
-describe.skipIf(!existsSync(DIST))('exit-code contract (spawned CLI)', () => {
+// Each case spawns a real node process. Under `--coverage` the child inherits
+// NODE_V8_COVERAGE and writes its own profile on exit, which pushes a spawn
+// past the 5s default; scoped here rather than globally so the other ~480
+// in-process tests keep a tight timeout.
+describe.skipIf(!existsSync(DIST))('exit-code contract (spawned CLI)', { timeout: 30_000 }, () => {
   it('unknown root option → 3', () => {
     expect(run(['--nonexistent-flag'])).toBe(3);
   });
