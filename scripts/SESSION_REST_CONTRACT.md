@@ -53,6 +53,15 @@
 | `/api/v1/projects/{id}/users` | POST | API key | `{relations:[{userId, role}]}`, role ∈ `project:admin\|project:editor\|project:viewer` | 201 | Projects | add members |
 | `/api/v1/projects/{id}/users/{userId}` | DELETE | API key | — | 204 | Projects | remove member |
 
+### Public-API archive endpoints (1.7.0 workflow archive/unarchive — n8n-io/n8n PR #27513, merged 2026-03-27)
+
+| Endpoint | Method | Auth | Body | Response | License | Notes |
+|---|---|---|---|---|---|---|
+| `/api/v1/workflows/{id}/archive` | POST | API key (`workflow:delete` scope) | — | `{...workflow, isArchived:true, active:false}` | none | **LIVE-VERIFIED absent on n8npc 1.122.5 → 404** (field `isArchived` exists in the model but the endpoint does not). Present in current n8n (checked ≤ 2.34.5). Archiving forces `active:false` (source: `WorkflowService.archive`); archiving an already-archived wf is a 200 no-op (`skipArchived:true`). |
+| `/api/v1/workflows/{id}/unarchive` | POST | API key (`workflow:delete` scope) | — | `{...workflow, isArchived:false}` | none | Unarchiving a non-archived wf → **400** (`BadRequestError`, maps to exit 1). Does NOT re-activate — stays inactive. |
+
+> **404-disambiguation contract**: a 404 on these paths is ambiguous (missing workflow vs missing endpoint on an old instance). `archiveWithVersionGuard` re-GETs the workflow on 404 — GET 404 ⇒ genuinely missing (rethrow original); GET 200 ⇒ endpoint absent ⇒ upgrade hint. Verified on n8npc 1.122.5 where the GET-200 branch fires.
+
 ---
 <details><summary>Original template (superseded by findings above)</summary>
 

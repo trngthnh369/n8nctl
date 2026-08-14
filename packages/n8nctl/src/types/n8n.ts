@@ -2,6 +2,12 @@ export interface Workflow {
   id: string;
   name: string;
   active: boolean;
+  /**
+   * Present since an EARLIER n8n release than the archive/unarchive endpoints
+   * themselves — 1.122.5 returns this field but 404s on `POST /archive`. Never
+   * infer endpoint availability from it; see scripts/SESSION_REST_CONTRACT.md.
+   */
+  isArchived?: boolean;
   nodes: WorkflowNode[];
   connections: Record<string, unknown>;
   settings?: Record<string, unknown>;

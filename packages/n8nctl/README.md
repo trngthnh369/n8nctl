@@ -79,7 +79,9 @@ See [the umbrella README](../../README.md) for the full monorepo context.
 | `workflow trigger-webhook <id> [--data <json>]` | POST to a workflow's webhook URL |
 | `workflow verify <id> [--expect <file>]` | Gate an execution against expectations (exit 6 on failed assertion) |
 | `workflow backup <id> [-o <dir>]` | Backup to timestamped file |
-| `workflow delete <id> [--yes]` | Delete workflow |
+| `workflow archive <id>` | Archive a workflow (reversible; forces it inactive) — the safe alternative to `delete` |
+| `workflow unarchive <id>` | Restore an archived workflow (leaves it inactive) |
+| `workflow delete <id> [--yes]` | Delete workflow (permanent) |
 | `workflow validate <file> [--strict]` | Offline 7-layer validation |
 
 > This table covers the common verbs. Run `n8nctl workflow --help` for the full
