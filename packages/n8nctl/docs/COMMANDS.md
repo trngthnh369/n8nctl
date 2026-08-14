@@ -396,6 +396,10 @@ Manage n8n workflows
 
 Activate a workflow
 
+### `workflow archive <id>`
+
+Archive a workflow (reversible; use `unarchive` to restore). The safe alternative to `delete`.
+
 ### `workflow backup <id>`
 
 Backup a workflow to a timestamped JSON file
@@ -591,6 +595,10 @@ Trigger a workflow by hitting its webhook node URL (n8n Public API has no /execu
   - `--expect-status <code>` — Assert the webhook responds with exactly this HTTP status (single-shot, no retry; mismatch exits 6)
   - `--capture <file>` — Write the webhook {status, body} to file (redacted by default)
   - `--unsafe-raw-io` — Disable redaction in --capture output (handle file as a secret)
+
+### `workflow unarchive <id>`
+
+Restore an archived workflow (leaves it inactive)
 
 ### `workflow update <id> <file>`
 

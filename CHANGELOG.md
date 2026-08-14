@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] — 2026-08-14 (workflow archive / unarchive)
+
+### Added
+
+- **`workflow archive <id>`** and **`workflow unarchive <id>`** — the reversible
+  alternative to `workflow delete` (which is permanent). Maps to the n8n public
+  API `POST /workflows/{id}/archive` and `/unarchive` (n8n-io/n8n PR #27513).
+  Archiving forces the workflow inactive; `--dry-run` shows a deactivation note
+  when the target is active. Unarchive leaves the workflow inactive (run
+  `workflow activate` to re-enable). Both honour `--dry-run`; like `activate`
+  and `delete`, they print a status line rather than a JSON document, so
+  `--json` does not change their output.
+- `Workflow.isArchived` added to the CLI type.
+
+### Notes
+
+- **Instance version gate**: these endpoints were added to the n8n public API
+  after the `isArchived` field itself — they are **absent on n8n 1.122.5**
+  (live-verified: the model has `isArchived` but `POST /archive` returns 404).
+  A 404 is disambiguated at the error path (re-GET the workflow): a genuinely
+  missing workflow keeps its 404, while an existing workflow surfaces an
+  upgrade hint instead of a bare 404. Upgrade n8n to use the commands.
+
 ## [1.6.0] — 2026-08-05 (MCP helpers + repo reunification)
 
 Reunites the `trngthnh369/n8nctl` line, whose `mcp` work had been stranded on a

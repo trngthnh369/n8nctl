@@ -5,6 +5,8 @@ import { createCreateCommand } from './create.js';
 import { createUpdateCommand } from './update.js';
 import { createActivateCommand } from './activate.js';
 import { createDeactivateCommand } from './deactivate.js';
+import { createArchiveCommand } from './archive.js';
+import { createUnarchiveCommand } from './unarchive.js';
 import { createTriggerWebhookCommand } from './trigger-webhook.js';
 import { createBackupCommand } from './backup.js';
 import { createDeleteCommand } from './delete.js';
@@ -40,6 +42,8 @@ export function createWorkflowCommand(): Command {
   cmd.addCommand(createTriggerWebhookCommand());
   cmd.addCommand(createRunCommand());
   cmd.addCommand(createBackupCommand());
+  cmd.addCommand(createArchiveCommand());
+  cmd.addCommand(createUnarchiveCommand());
   cmd.addCommand(createDeleteCommand());
   cmd.addCommand(createValidateCommand());
   cmd.addCommand(createNormalizeCommand());

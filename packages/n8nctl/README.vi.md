@@ -70,7 +70,9 @@ n8nctl mcp config --client codex --server-name n8n-prod --token-env N8N_MCP_TOKE
 | `workflow deactivate <id>` | Tắt workflow |
 | `workflow trigger-webhook <id> --wait` | Fire webhook + đợi kết quả |
 | `workflow backup <id> [-o <dir>]` | Backup ra file có timestamp |
-| `workflow delete <id> [--yes]` | Xoá workflow |
+| `workflow archive <id>` | Archive workflow (đảo ngược được; tự tắt active) — thay cho `delete` |
+| `workflow unarchive <id>` | Khôi phục workflow đã archive (vẫn để inactive) |
+| `workflow delete <id> [--yes]` | Xoá workflow (vĩnh viễn) |
 | `workflow validate <file> [--strict]` | Validate offline 6 lớp |
 | `workflow diff <id> <file>` | So sánh local vs deployed |
 | `workflow restore <backup.json>` | Khôi phục từ backup |
