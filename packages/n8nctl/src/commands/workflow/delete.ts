@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { withAction } from '../../lib/runtime.js';
 import { confirmPrompt } from '../../lib/prompt.js';
+import { printMutation } from '../../lib/output.js';
 import { c } from '../../lib/io.js';
 import type { Factory } from '../../factory.js';
 import type { Workflow } from '../../types/n8n.js';
@@ -19,7 +20,9 @@ export async function deleteWorkflowHandler(
 
   if (factory.flags.dryRun) {
     const wf = await client.get<Workflow>(`/workflows/${encodeURIComponent(id)}`);
-    factory.io.stdout.write(
+    await printMutation(
+      { io: factory.io, opts: factory.flags },
+      { id: wf.id, name: wf.name, active: wf.active, dryRun: true },
       `${c.yellow('[dry-run]')} would delete workflow ${c.bold(wf.id)} "${wf.name}" (active=${wf.active})\n`,
     );
     return;
@@ -34,7 +37,11 @@ export async function deleteWorkflowHandler(
   }
 
   await client.delete(`/workflows/${encodeURIComponent(id)}`);
-  factory.io.stdout.write(`${c.green('✓')} deleted workflow ${c.bold(id)}\n`);
+  await printMutation(
+    { io: factory.io, opts: factory.flags },
+    { id, deleted: true },
+    `${c.green('✓')} deleted workflow ${c.bold(id)}\n`,
+  );
 }
 
 export function createDeleteCommand(): Command {

@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { withAction } from '../../lib/runtime.js';
 import { ValidationError } from '../../lib/errors.js';
 import { rethrowWithLicenseHint } from '../../lib/license.js';
+import { printMutation } from '../../lib/output.js';
 import { c } from '../../lib/io.js';
 import type { Factory } from '../../factory.js';
 
@@ -19,7 +20,11 @@ export async function userRoleHandler(
   const client = await factory.client();
 
   if (factory.flags.dryRun) {
-    factory.io.stdout.write(`${c.yellow('[dry-run]')} would set role of ${c.bold(id)} → ${role}\n`);
+    await printMutation(
+      { io: factory.io, opts: factory.flags },
+      { id, role, dryRun: true },
+      `${c.yellow('[dry-run]')} would set role of ${c.bold(id)} → ${role}\n`,
+    );
     return;
   }
 
@@ -28,7 +33,11 @@ export async function userRoleHandler(
   } catch (err) {
     rethrowWithLicenseHint(err, 'User management');
   }
-  factory.io.stdout.write(`${c.green('✓')} set role of ${c.bold(id)} → ${role}\n`);
+  await printMutation(
+    { io: factory.io, opts: factory.flags },
+    { id, role },
+    `${c.green('✓')} set role of ${c.bold(id)} → ${role}\n`,
+  );
 }
 
 export function createRoleCommand(): Command {

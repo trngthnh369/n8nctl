@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { withAction } from '../../lib/runtime.js';
 import { ValidationError } from '../../lib/errors.js';
 import { rethrowWithLicenseHint } from '../../lib/license.js';
+import { printMutation } from '../../lib/output.js';
 import { c } from '../../lib/io.js';
 import type { Factory } from '../../factory.js';
 
@@ -21,7 +22,9 @@ export async function transferCredentialHandler(
   const client = await factory.client();
 
   if (factory.flags.dryRun) {
-    factory.io.stdout.write(
+    await printMutation(
+      { io: factory.io, opts: factory.flags },
+      { id, destinationProjectId: opts.to, dryRun: true },
       `${c.yellow('[dry-run]')} would transfer credential ${c.bold(id)} → project ${opts.to}\n`,
     );
     return;
@@ -34,7 +37,11 @@ export async function transferCredentialHandler(
   } catch (err) {
     rethrowWithLicenseHint(err, 'Projects (credential transfer)');
   }
-  factory.io.stdout.write(`${c.green('✓')} transferred credential ${c.bold(id)} → project ${opts.to}\n`);
+  await printMutation(
+    { io: factory.io, opts: factory.flags },
+    { id, destinationProjectId: opts.to, transferred: true },
+    `${c.green('✓')} transferred credential ${c.bold(id)} → project ${opts.to}\n`,
+  );
 }
 
 export function createTransferCommand(): Command {

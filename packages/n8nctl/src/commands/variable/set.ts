@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { withAction } from '../../lib/runtime.js';
 import { ApiError } from '../../lib/errors.js';
+import { printMutation } from '../../lib/output.js';
 import { c } from '../../lib/io.js';
 import { rethrowWithLicenseHint } from '../../lib/license.js';
 import type { Factory } from '../../factory.js';
@@ -33,7 +34,9 @@ export async function variableSetHandler(
   }
 
   if (factory.flags.dryRun) {
-    factory.io.stdout.write(
+    await printMutation(
+      { io: factory.io, opts: factory.flags },
+      { key, dryRun: true },
       `${c.yellow('[dry-run]')} would ${existing ? `update variable ${existing.id}` : 'create variable'} ${c.bold(key)}\n`,
     );
     return;
@@ -42,7 +45,11 @@ export async function variableSetHandler(
   if (existing) {
     try {
       await client.put(`/variables/${encodeURIComponent(existing.id)}`, { key, value });
-      factory.io.stdout.write(`${c.green('✓')} updated variable ${c.bold(key)} (${existing.id})\n`);
+      await printMutation(
+        { io: factory.io, opts: factory.flags },
+        { id: existing.id, key, updated: true },
+        `${c.green('✓')} updated variable ${c.bold(key)} (${existing.id})\n`,
+      );
       return;
     } catch (err) {
       // Older n8n versions have no PUT /variables — fall back to delete+create.
@@ -52,7 +59,9 @@ export async function variableSetHandler(
   }
 
   const created = await client.post<N8nVariable>('/variables', { key, value });
-  factory.io.stdout.write(
+  await printMutation(
+    { io: factory.io, opts: factory.flags },
+    { id: created?.id, key, created: true },
     `${c.green('✓')} created variable ${c.bold(key)}${created?.id ? ` (${created.id})` : ''}\n`,
   );
 }

@@ -78,6 +78,37 @@ export async function printData(
 }
 
 /**
+ * Report the outcome of a state-changing command.
+ *
+ * Mutation verbs (activate, archive, delete, tag create, …) print a status line
+ * rather than a document, so they historically bypassed `printData` entirely —
+ * which meant `--json` silently did nothing and a script doing
+ * `n8nctl workflow archive X --json | jq` got human text and failed to parse.
+ *
+ * This is deliberately OPT-IN rather than the full contract §2 behaviour: with
+ * no output flag the status line still goes to stdout exactly as before, so
+ * existing scripts that pipe these commands keep working. Only an explicit
+ * `--json` / `--jq` / `--template` switches stdout to machine-readable data,
+ * and then the human line moves to stderr so stdout stays pure.
+ *
+ * Takes a PrintContext rather than a Factory on purpose — `lib/output.ts` must
+ * not depend on `factory.ts`, which would close an import cycle.
+ */
+export async function printMutation(
+  ctx: PrintContext,
+  data: unknown,
+  friendly: string,
+): Promise<void> {
+  const machineReadable = Boolean(ctx.opts.json || ctx.opts.jq || ctx.opts.template);
+  if (!machineReadable) {
+    ctx.io.stdout.write(friendly);
+    return;
+  }
+  ctx.io.stderr.write(friendly);
+  await printData(data, ctx);
+}
+
+/**
  * Render a user-supplied Handlebars template against data.
  *
  * Sandboxing decisions:

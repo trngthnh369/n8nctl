@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { withAction } from '../../lib/runtime.js';
 import { confirmPrompt } from '../../lib/prompt.js';
 import { rethrowWithLicenseHint } from '../../lib/license.js';
+import { printMutation } from '../../lib/output.js';
 import { c } from '../../lib/io.js';
 import type { Factory } from '../../factory.js';
 
@@ -18,7 +19,11 @@ export async function userDeleteHandler(
   const client = await factory.client();
 
   if (factory.flags.dryRun) {
-    factory.io.stdout.write(`${c.yellow('[dry-run]')} would delete user ${c.bold(id)}\n`);
+    await printMutation(
+      { io: factory.io, opts: factory.flags },
+      { id, dryRun: true },
+      `${c.yellow('[dry-run]')} would delete user ${c.bold(id)}\n`,
+    );
     return;
   }
 
@@ -34,7 +39,11 @@ export async function userDeleteHandler(
   } catch (err) {
     rethrowWithLicenseHint(err, 'User management');
   }
-  factory.io.stdout.write(`${c.green('✓')} deleted user ${c.bold(id)}\n`);
+  await printMutation(
+    { io: factory.io, opts: factory.flags },
+    { id, deleted: true },
+    `${c.green('✓')} deleted user ${c.bold(id)}\n`,
+  );
 }
 
 export function createDeleteCommand(): Command {

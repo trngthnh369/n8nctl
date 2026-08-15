@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { withAction } from '../../lib/runtime.js';
 import { ValidationError } from '../../lib/errors.js';
+import { printMutation } from '../../lib/output.js';
 import { c } from '../../lib/io.js';
 import { rethrowWithLicenseHint } from '../../lib/license.js';
 import type { Factory } from '../../factory.js';
@@ -30,14 +31,20 @@ export async function variableDeleteHandler(
   }
 
   if (factory.flags.dryRun) {
-    factory.io.stdout.write(
+    await printMutation(
+      { io: factory.io, opts: factory.flags },
+      { id: target.id, key: target.key, dryRun: true },
       `${c.yellow('[dry-run]')} would delete variable ${c.bold(target.key)} (${target.id})\n`,
     );
     return;
   }
 
   await client.delete(`/variables/${encodeURIComponent(target.id)}`);
-  factory.io.stdout.write(`${c.green('✓')} deleted variable ${c.bold(target.key)} (${target.id})\n`);
+  await printMutation(
+    { io: factory.io, opts: factory.flags },
+    { id: target.id, key: target.key, deleted: true },
+    `${c.green('✓')} deleted variable ${c.bold(target.key)} (${target.id})\n`,
+  );
 }
 
 export function createDeleteCommand(): Command {

@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { withAction } from '../../lib/runtime.js';
+import { printMutation } from '../../lib/output.js';
 import { c } from '../../lib/io.js';
 import { ApiError, ValidationError } from '../../lib/errors.js';
 import { fetchAllTags } from '../../lib/tags.js';
@@ -91,7 +92,9 @@ export async function tagHandler(
   }
 
   if (factory.flags.dryRun) {
-    factory.io.stdout.write(
+    await printMutation(
+      { io: factory.io, opts: factory.flags },
+      { id, tags: resolved.map((t) => ({ id: t.id, name: t.name })), dryRun: true },
       `${c.yellow('[dry-run]')} would set tags on ${id} → [${resolved.map((t) => t.name).join(', ')}]\n`,
     );
     return;
@@ -101,7 +104,9 @@ export async function tagHandler(
     `/workflows/${encodeURIComponent(id)}/tags`,
     finalTagIds.map((tId) => ({ id: tId })),
   );
-  factory.io.stdout.write(
+  await printMutation(
+    { io: factory.io, opts: factory.flags },
+    { id, tags: resolved.map((t) => ({ id: t.id, name: t.name })), replaced: Boolean(opts.replace) },
     `${c.green('✓')} tagged ${c.bold(id)} with [${resolved.map((t) => t.name).join(', ')}]\n`,
   );
 }

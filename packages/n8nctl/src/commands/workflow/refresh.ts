@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { withAction } from '../../lib/runtime.js';
+import { printMutation } from '../../lib/output.js';
 import { c } from '../../lib/io.js';
 import { sleep, parsePositiveInt } from '../../lib/util.js';
 import type { Factory } from '../../factory.js';
@@ -32,7 +33,9 @@ export async function refreshHandler(
   }
 
   if (factory.flags.dryRun) {
-    factory.io.stdout.write(
+    await printMutation(
+      { io: factory.io, opts: factory.flags },
+      { id, name: before.name, delayMs: delay, dryRun: true },
       `${c.yellow('[dry-run]')} would cycle "${before.name}" (${id}): deactivate → wait ${delay}ms → activate\n`,
     );
     return;
@@ -55,7 +58,9 @@ export async function refreshHandler(
     process.exitCode = 1;
     return;
   }
-  factory.io.stdout.write(
+  await printMutation(
+    { io: factory.io, opts: factory.flags },
+    { id, name: after.name, active: after.active, cycled: true },
     `${c.green('✓')} cycled "${after.name}" (${id}) → active\n`,
   );
   factory.io.stderr.write(
