@@ -1,6 +1,6 @@
 {
   "name": "@trngthnh369/n8nctl",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "description": "CLI for managing n8n workflows via REST API — kubectl for n8n, inspired by gh.",
   "keywords": [
     "n8n",

@@ -12,6 +12,20 @@ export async function deactivateHandler(
 ): Promise<void> {
   const [id] = args;
   const client = await factory.client();
+
+  // See activate.ts — `--dry-run deactivate` used to take a live workflow
+  // offline, which is the more damaging half of the same bug.
+  if (factory.flags.dryRun) {
+    const wf = await client.get<Workflow>(`/workflows/${encodeURIComponent(id)}`);
+    await printMutation(
+      { io: factory.io, opts: factory.flags },
+      { id: wf.id, name: wf.name, active: wf.active, dryRun: true, alreadyInactive: !wf.active },
+      `${c.yellow('[dry-run]')} would deactivate workflow ${c.bold(wf.id)} "${wf.name}"` +
+        `${wf.active ? '' : ' (already inactive — no change)'}\n`,
+    );
+    return;
+  }
+
   const result = await client.post<Workflow>(`/workflows/${encodeURIComponent(id)}/deactivate`);
   await printMutation(
     { io: factory.io, opts: factory.flags },

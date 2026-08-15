@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.1] — 2026-08-14 (`--dry-run` no longer mutates on activate/deactivate)
+
+### Fixed
+
+- **`workflow activate` and `workflow deactivate` ignored `--dry-run` and
+  performed the change anyway.** Every other mutation verb honours the flag, so
+  a caller reasonably treats `--dry-run` as a safe way to see what a script
+  would touch on production — `n8nctl workflow --dry-run deactivate <id>` took
+  a live workflow offline instead. Both now GET the workflow, print a
+  `[dry-run]` preview (noting when it would be a no-op), and issue no write.
+
+  Found by running the command against a live instance during release
+  verification and seeing it print `deactivated` where `[dry-run]` was
+  expected. Regression tests assert the absence of the POST, not just the
+  wording, so the guard cannot decay into a cosmetic message.
+
 ## [1.8.0] — 2026-08-14 (mutation verbs honour --json / --jq / --template)
 
 ### Fixed
