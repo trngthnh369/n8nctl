@@ -3,6 +3,7 @@ import { withAction } from '../../lib/runtime.js';
 import { confirmPrompt } from '../../lib/prompt.js';
 import { ValidationError } from '../../lib/errors.js';
 import { rethrowWithLicenseHint } from '../../lib/license.js';
+import { printMutation } from '../../lib/output.js';
 import { c } from '../../lib/io.js';
 import type { Factory } from '../../factory.js';
 
@@ -23,12 +24,18 @@ export async function projectCreateHandler(
   const [name] = args;
   const client = await factory.client();
   if (factory.flags.dryRun) {
-    factory.io.stdout.write(`${c.yellow('[dry-run]')} would create project "${name}"\n`);
+    await printMutation(
+      { io: factory.io, opts: factory.flags },
+      { name, dryRun: true },
+      `${c.yellow('[dry-run]')} would create project "${name}"\n`,
+    );
     return;
   }
   try {
     const created = await client.post<{ id?: string; name?: string }>('/projects', { name });
-    factory.io.stdout.write(
+    await printMutation(
+      { io: factory.io, opts: factory.flags },
+      { id: created?.id, name: created?.name ?? name },
       `${c.green('✓')} created project ${c.bold(created?.id ?? '')} "${created?.name ?? name}"\n`,
     );
   } catch (err) {
@@ -44,7 +51,11 @@ export async function projectUpdateHandler(
   const [id, name] = args;
   const client = await factory.client();
   if (factory.flags.dryRun) {
-    factory.io.stdout.write(`${c.yellow('[dry-run]')} would rename project ${c.bold(id)} → "${name}"\n`);
+    await printMutation(
+      { io: factory.io, opts: factory.flags },
+      { id, name, dryRun: true },
+      `${c.yellow('[dry-run]')} would rename project ${c.bold(id)} → "${name}"\n`,
+    );
     return;
   }
   try {
@@ -52,7 +63,11 @@ export async function projectUpdateHandler(
   } catch (err) {
     rethrowWithLicenseHint(err, 'Projects');
   }
-  factory.io.stdout.write(`${c.green('✓')} renamed project ${c.bold(id)} → "${name}"\n`);
+  await printMutation(
+    { io: factory.io, opts: factory.flags },
+    { id, name },
+    `${c.green('✓')} renamed project ${c.bold(id)} → "${name}"\n`,
+  );
 }
 
 export async function projectDeleteHandler(
@@ -63,7 +78,11 @@ export async function projectDeleteHandler(
   const [id] = args;
   const client = await factory.client();
   if (factory.flags.dryRun) {
-    factory.io.stdout.write(`${c.yellow('[dry-run]')} would delete project ${c.bold(id)}\n`);
+    await printMutation(
+      { io: factory.io, opts: factory.flags },
+      { id, dryRun: true },
+      `${c.yellow('[dry-run]')} would delete project ${c.bold(id)}\n`,
+    );
     return;
   }
   if (!opts.yes && factory.io.isTTY) {
@@ -77,7 +96,11 @@ export async function projectDeleteHandler(
   } catch (err) {
     rethrowWithLicenseHint(err, 'Projects');
   }
-  factory.io.stdout.write(`${c.green('✓')} deleted project ${c.bold(id)}\n`);
+  await printMutation(
+    { io: factory.io, opts: factory.flags },
+    { id, deleted: true },
+    `${c.green('✓')} deleted project ${c.bold(id)}\n`,
+  );
 }
 
 export async function projectAddUserHandler(
@@ -92,7 +115,9 @@ export async function projectAddUserHandler(
   }
   const client = await factory.client();
   if (factory.flags.dryRun) {
-    factory.io.stdout.write(
+    await printMutation(
+      { io: factory.io, opts: factory.flags },
+      { projectId, userId, role, dryRun: true },
       `${c.yellow('[dry-run]')} would add user ${c.bold(userId)} to project ${projectId} as ${role}\n`,
     );
     return;
@@ -104,7 +129,11 @@ export async function projectAddUserHandler(
   } catch (err) {
     rethrowWithLicenseHint(err, 'Projects');
   }
-  factory.io.stdout.write(`${c.green('✓')} added ${c.bold(userId)} to project ${projectId} as ${role}\n`);
+  await printMutation(
+    { io: factory.io, opts: factory.flags },
+    { projectId, userId, role },
+    `${c.green('✓')} added ${c.bold(userId)} to project ${projectId} as ${role}\n`,
+  );
 }
 
 export async function projectRemoveUserHandler(
@@ -115,7 +144,9 @@ export async function projectRemoveUserHandler(
   const [projectId, userId] = args;
   const client = await factory.client();
   if (factory.flags.dryRun) {
-    factory.io.stdout.write(
+    await printMutation(
+      { io: factory.io, opts: factory.flags },
+      { projectId, userId, dryRun: true },
       `${c.yellow('[dry-run]')} would remove user ${c.bold(userId)} from project ${projectId}\n`,
     );
     return;
@@ -131,7 +162,11 @@ export async function projectRemoveUserHandler(
   } catch (err) {
     rethrowWithLicenseHint(err, 'Projects');
   }
-  factory.io.stdout.write(`${c.green('✓')} removed ${c.bold(userId)} from project ${projectId}\n`);
+  await printMutation(
+    { io: factory.io, opts: factory.flags },
+    { projectId, userId, removed: true },
+    `${c.green('✓')} removed ${c.bold(userId)} from project ${projectId}\n`,
+  );
 }
 
 export function createProjectManageCommands(): Command[] {

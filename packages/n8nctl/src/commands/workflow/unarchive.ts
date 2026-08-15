@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { withAction } from '../../lib/runtime.js';
+import { printMutation } from '../../lib/output.js';
 import { c } from '../../lib/io.js';
 import { archiveWithVersionGuard } from './archive.js';
 import type { Factory } from '../../factory.js';
@@ -24,14 +25,18 @@ export async function unarchiveHandler(
     // The GET is already paid for, so flag the documented 400 here rather than
     // letting a --dry-run report success for a call that cannot succeed.
     const warn = wf.isArchived === false ? ' — but it is NOT archived, so this would fail (400)' : '';
-    factory.io.stdout.write(
+    await printMutation(
+      { io: factory.io, opts: factory.flags },
+      { id: wf.id, name: wf.name, isArchived: wf.isArchived, dryRun: true },
       `${c.yellow('[dry-run]')} would unarchive workflow ${c.bold(wf.id)} "${wf.name}"${warn}\n`,
     );
     return;
   }
 
   const result = await archiveWithVersionGuard(client, id, 'unarchive');
-  factory.io.stdout.write(
+  await printMutation(
+    { io: factory.io, opts: factory.flags },
+    { id: result.id, name: result.name, isArchived: false, active: result.active ?? false },
     `${c.green('✓')} unarchived workflow ${c.bold(result.id)} "${result.name}" ` +
       `${c.dim('(still inactive — run `workflow activate` to enable)')}\n`,
   );

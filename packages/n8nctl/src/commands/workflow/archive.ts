@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { withAction } from '../../lib/runtime.js';
 import { ApiError } from '../../lib/errors.js';
+import { printMutation } from '../../lib/output.js';
 import { c } from '../../lib/io.js';
 import type { Factory } from '../../factory.js';
 import type { Workflow } from '../../types/n8n.js';
@@ -22,7 +23,9 @@ export async function archiveHandler(
 
   if (factory.flags.dryRun) {
     const wf = await client.get<Workflow>(`/workflows/${encodeURIComponent(id)}`);
-    factory.io.stdout.write(
+    await printMutation(
+      { io: factory.io, opts: factory.flags },
+      { id: wf.id, name: wf.name, active: wf.active, dryRun: true, wouldDeactivate: Boolean(wf.active) },
       `${c.yellow('[dry-run]')} would archive workflow ${c.bold(wf.id)} "${wf.name}"` +
         `${wf.active ? ' (and deactivate it)' : ''}\n`,
     );
@@ -30,7 +33,9 @@ export async function archiveHandler(
   }
 
   const result = await archiveWithVersionGuard(client, id, 'archive');
-  factory.io.stdout.write(
+  await printMutation(
+    { io: factory.io, opts: factory.flags },
+    { id: result.id, name: result.name, isArchived: true, active: result.active ?? false },
     `${c.green('✓')} archived workflow ${c.bold(result.id)} "${result.name}"\n`,
   );
 }

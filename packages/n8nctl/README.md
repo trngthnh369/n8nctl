@@ -160,6 +160,21 @@ n8nctl workflow list --jq '.[] | select(.active)' # jq query
 n8nctl workflow list --template '{{#each this}}{{id}}  {{name}}{{newline}}{{/each}}'
 ```
 
+State-changing commands (`activate`, `archive`, `delete`, `tag create`, `variable set`, …)
+report a status line instead of a document, so they behave slightly differently:
+
+```bash
+n8nctl workflow activate 58                # ✓ activated workflow 58 "wf"  (stdout)
+n8nctl workflow activate 58 | cat          # same text — piping does NOT switch to JSON
+n8nctl workflow activate 58 --json         # {"id":"58","name":"wf","active":true} on stdout,
+                                           #   status line on stderr so stdout stays pure
+n8nctl workflow archive 58 --jq '.id'      # "58"
+n8nctl workflow delete 58 --dry-run --json # preview as JSON, flagged "dryRun": true
+```
+
+The status line stays on stdout by default *on purpose*: switching piped output to JSON
+would break every existing script that greps it. Pass an explicit flag to opt in.
+
 ## Exit codes
 
 | Code | Meaning |

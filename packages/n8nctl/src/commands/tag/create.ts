@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { withAction } from '../../lib/runtime.js';
+import { printMutation } from '../../lib/output.js';
 import { c } from '../../lib/io.js';
 import type { Factory } from '../../factory.js';
 import type { WorkflowTag } from '../../types/n8n.js';
@@ -12,11 +13,17 @@ export async function createTagHandler(
   const [name] = args;
   const client = await factory.client();
   if (factory.flags.dryRun) {
-    factory.io.stdout.write(`${c.yellow('[dry-run]')} would create tag "${name}"\n`);
+    await printMutation(
+      { io: factory.io, opts: factory.flags },
+      { name, dryRun: true },
+      `${c.yellow('[dry-run]')} would create tag "${name}"\n`,
+    );
     return;
   }
   const created = await client.post<WorkflowTag>('/tags', { name });
-  factory.io.stdout.write(
+  await printMutation(
+    { io: factory.io, opts: factory.flags },
+    { id: created.id, name: created.name },
     `${c.green('✓')} created tag ${c.bold(created.id)} "${created.name}"\n`,
   );
 }

@@ -139,6 +139,20 @@ n8nctl workflow list --jq '.[] | select(.active)' # jq query
 n8nctl workflow list --template '{{#each this}}{{id}}  {{name}}{{newline}}{{/each}}'
 ```
 
+Lệnh đổi state (`activate`, `archive`, `delete`, `tag create`, `variable set`, …) in ra
+một dòng trạng thái chứ không phải document, nên hành vi hơi khác:
+
+```bash
+n8nctl workflow activate 58                # ✓ activated workflow 58 "wf"  (stdout)
+n8nctl workflow activate 58 | cat          # vẫn là text — pipe KHÔNG tự đổi sang JSON
+n8nctl workflow activate 58 --json         # stdout ra JSON sạch, dòng trạng thái sang stderr
+n8nctl workflow archive 58 --jq '.id'      # "58"
+n8nctl workflow delete 58 --dry-run --json # preview dạng JSON, có cờ "dryRun": true
+```
+
+Dòng trạng thái mặc định vẫn ở stdout là **có chủ đích**: đổi output khi pipe sang JSON sẽ
+phá mọi script đang grep nó. Muốn JSON thì truyền cờ tường minh.
+
 ## Exit codes
 
 | Code | Ý nghĩa |

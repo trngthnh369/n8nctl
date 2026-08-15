@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] — 2026-08-14 (mutation verbs honour --json / --jq / --template)
+
+### Fixed
+
+- **`--json` silently did nothing on state-changing commands.** `workflow
+  activate`, `archive`, `delete`, `tag create`, `variable set`, … printed a
+  status line straight to stdout and never went through `printData`, so
+  `n8nctl workflow archive X --json | jq` received human text and failed to
+  parse — with no error to signal why. 19 commands now route their result
+  through the new `printMutation` helper: `workflow`
+  activate/deactivate/archive/unarchive/delete/refresh/tag/transfer,
+  `tag` create/update/delete, `variable` set/delete, `execution delete`,
+  `credential` delete/transfer, `user` delete/role, and `project` create/
+  update/delete/add-user/remove-user. `--dry-run` previews are machine-readable
+  too, flagged with `"dryRun": true`.
+
+### Notes
+
+- **This is deliberately opt-in and NOT a breaking change.** With no output
+  flag the status line still goes to stdout exactly as before — including when
+  stdout is piped — so existing scripts keep working. Only an explicit
+  `--json` / `--jq` / `--template` switches stdout to machine-readable data,
+  and then the human line moves to stderr so stdout stays pure.
+- This means these commands still do not follow the "non-TTY always JSON"
+  rule in the output contract (§2) by default. Aligning them fully would
+  change piped output for every existing caller, so it is left as a deliberate
+  future major-version decision rather than smuggled in here.
+
 ## [1.7.0] — 2026-08-14 (workflow archive / unarchive)
 
 ### Added
@@ -14,9 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   API `POST /workflows/{id}/archive` and `/unarchive` (n8n-io/n8n PR #27513).
   Archiving forces the workflow inactive; `--dry-run` shows a deactivation note
   when the target is active. Unarchive leaves the workflow inactive (run
-  `workflow activate` to re-enable). Both honour `--dry-run`; like `activate`
-  and `delete`, they print a status line rather than a JSON document, so
-  `--json` does not change their output.
+  `workflow activate` to re-enable). Both honour `--dry-run`. (At 1.7.0 they
+  printed a status line and ignored `--json`, like `activate`/`delete`; 1.8.0
+  fixed that for all mutation verbs.)
 - `Workflow.isArchived` added to the CLI type.
 
 ### Notes
