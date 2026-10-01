@@ -852,6 +852,16 @@ describe('toExecutionRecord', () => {
     expect(r).toMatchObject({ id: 'abc', workflowId: 'wf', waitTill: '2026-10-01T00:00:00Z' });
   });
 
+  it('should drop tabs and newlines from short server fields', () => {
+    const r = toExecutionRecord({ id: '7\n', status: 'error\r\n', startedAt: '2026-10-01T00:00:00Z\t' });
+
+    expect(r).toMatchObject({ id: '7', status: 'error', startedAt: '2026-10-01T00:00:00Z' });
+  });
+
+  it('should show an id made only of unsafe chars escaped instead of throwing', () => {
+    expect(toExecutionRecord({ id: j(ZWSP, RLO) }).id).toBe(String.raw`\u200b\u202e`);
+  });
+
   it('should copy the known fields and never copy data', () => {
     const r = toExecutionRecord({
       id: '7',

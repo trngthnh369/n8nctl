@@ -516,6 +516,18 @@ describe('execution stats handler', () => {
     expect(out.totals.count).toBe(1);
   });
 
+  it('should attach error detail to a pass-1 record whose status is upper case', async () => {
+    const env = makeFakeFactory({ json: true });
+    const e1 = finished('e1', 'w1', 'ERROR', HOUR, 10);
+    routeExecutions(env, { summary: [e1], detail: [{ ...e1, data: errorData('boom', 'HTTP') }] });
+
+    await executionStatsHandler(env.factory, {}, []);
+    const out = JSON.parse(env.stdout());
+
+    expect(out.errorClusters).toHaveLength(1);
+    expect(out.errorClusters[0]).toMatchObject({ node: 'HTTP', executionIds: ['e1'] });
+  });
+
   it('should warn with scope detail when pass 2 is cut at --limit', async () => {
     const env = makeFakeFactory({ json: true, logFormat: 'ndjson' });
     const e1 = finished('e1', 'w1', 'error', HOUR, 10);

@@ -170,8 +170,11 @@ function idOrNull(value: unknown): string | null {
  */
 export function toExecutionRecord(e: unknown): ExecutionRecord {
   if (!isRecord(e)) throw new TypeError('execution row is not an object');
-  const id = cleanOrNull(idOrNull(e.id));
-  if (id === null) throw new TypeError('execution row has no string or number id');
+  const rawId = idOrNull(e.id);
+  if (rawId === null) throw new TypeError('execution row has no string or number id');
+  // An id made only of unsafe chars is shown escaped rather than dropped, so
+  // one odd row neither aborts the scan nor merges with another row.
+  const id = cleanOrNull(rawId) ?? escapeForDisplay(rawId);
   return {
     id,
     workflowId: cleanOrNull(idOrNull(e.workflowId)),
@@ -183,11 +186,20 @@ export function toExecutionRecord(e: unknown): ExecutionRecord {
   };
 }
 
-/** Server strings reach --json and --template unescaped: drop control and format characters. */
+/**
+ * Server strings reach --json and --template unescaped: drop ANSI, control
+ * characters (tabs and newlines too, which scrubAnsi keeps for free text) and
+ * format characters. These fields are ids, statuses and timestamps, never prose.
+ */
 function cleanOrNull(value: string | null): string | null {
   if (value === null) return null;
-  const clean = stripUnsafeChars(value);
+  const clean = stripUnsafeChars(value).replace(/[\t\r\n]/g, '');
   return clean === '' ? null : clean;
+}
+
+/** Every char outside printable ASCII as a \uXXXX escape: visible, unique, inert. */
+function escapeForDisplay(value: string): string {
+  return value.replace(/[^\x21-\x7e]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
 }
 
 // ---------------------------------------------------------------------------
