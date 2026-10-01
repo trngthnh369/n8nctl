@@ -5,11 +5,12 @@ import {
   STUCK_SCAN_LIMIT,
   DETAIL_SLACK,
   DETAIL_PAGE_SIZE,
+  DETAIL_STATUSES,
 } from '../src/commands/execution/stats.js';
 import { createExecutionCommand } from '../src/commands/execution/index.js';
 import { completionHandler } from '../src/commands/completion.js';
 import { buildProgram } from '../src/program.js';
-import { STATUS_BUCKETS } from '../src/lib/execution-stats.js';
+import { FAILED_BUCKETS, STATUS_BUCKETS } from '../src/lib/execution-stats.js';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -563,6 +564,44 @@ describe('execution stats handler', () => {
     );
   });
 
+  it('should fetch detail for exactly the failed buckets', () => {
+    expect([...DETAIL_STATUSES].sort()).toEqual([...FAILED_BUCKETS].sort());
+  });
+
+  it('should run the error pass before the crashed pass whatever order pass 1 lists them in', async () => {
+    const env = makeFakeFactory({ json: true });
+    routeExecutions(env, {
+      summary: [finished('c1', 'w1', 'crashed', HOUR, 10), finished('e1', 'w1', 'error', 2 * HOUR, 10)],
+    });
+
+    await executionStatsHandler(env.factory, {}, []);
+
+    const detailStatuses = env.apiMock.history.get
+      .map((r) => (r.params ?? {}) as Record<string, unknown>)
+      .filter((p) => p.includeData === true)
+      .map((p) => p.status);
+    expect(detailStatuses).toEqual(['error', 'crashed']);
+  });
+
+  it('should report only the cut pass in the warning when both passes run', async () => {
+    const env = makeFakeFactory({ json: true });
+    let page = 0;
+    routeExecutions(env, {
+      summary: [finished('e1', 'w1', 'error', HOUR, 10), finished('c1', 'w1', 'crashed', HOUR, 10)],
+      detail: () => {
+        page++;
+        const data = Array.from({ length: 20 }, (_, i) => finished(`n${page}-${i}`, 'w1', 'error', MINUTE, 10));
+        return [200, { data, nextCursor: `c${page}` }];
+      },
+      crashed: [],
+    });
+
+    await executionStatsHandler(env.factory, {}, []);
+
+    const warning = env.events.find((e) => e.event === 'execution-stats-truncated');
+    expect(warning?.payload).toMatchObject({ scope: 'detail', bound: 1 + DETAIL_SLACK, fetched: 1 + DETAIL_SLACK });
+  });
+
   it('should keep error detail when the crashed pass is rejected in the same run', async () => {
     const env = makeFakeFactory({ json: true, logFormat: 'ndjson' });
     const e1 = finished('e1', 'w1', 'error', HOUR, 10);
@@ -613,7 +652,7 @@ describe('execution stats handler', () => {
     expect(out.window.detailTruncated).toBe(true);
     // The warning names the bound that cut the pass, not --limit.
     const warning = env.events.find((e) => e.event === 'execution-stats-truncated');
-    expect(warning?.payload).toMatchObject({ scope: 'detail', limit: 1 + DETAIL_SLACK });
+    expect(warning?.payload).toMatchObject({ scope: 'detail', limit: 1000, bound: 1 + DETAIL_SLACK });
     expect(warning?.text).toContain(`bound of ${1 + DETAIL_SLACK} rows`);
   });
 
@@ -635,7 +674,7 @@ describe('execution stats handler', () => {
     expect(env.events).toContainEqual(
       expect.objectContaining({
         event: 'execution-stats-truncated',
-        payload: { level: 'warn', scope: 'detail', limit: 1, fetched: 1 },
+        payload: { level: 'warn', scope: 'detail', limit: 1, fetched: 1, bound: 1 },
       }),
     );
   });

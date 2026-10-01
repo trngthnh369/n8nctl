@@ -17,6 +17,7 @@ import {
   type ExecutionRecord,
   type ExecutionStats,
   type GroupStats,
+  type StatusBucket,
 } from '../../lib/execution-stats.js';
 import type { N8nClient } from '../../lib/api.js';
 import type { Factory } from '../../factory.js';
@@ -38,7 +39,7 @@ export const STUCK_SCAN_LIMIT = 500;
 /** Margin over the pass-1 failure count for rows that arrive between the passes. */
 export const DETAIL_SLACK = 100;
 /** Detail passes, in a fixed order so requests and the first failure are deterministic. */
-const DETAIL_STATUSES = ['error', 'crashed'] as const;
+export const DETAIL_STATUSES = ['error', 'crashed'] as const;
 
 /** The `window` object of the `--json` output: every key always present. */
 interface StatsWindow {
@@ -137,7 +138,7 @@ export async function executionStatsHandler(
     warnTruncated(factory, 'stuck', STUCK_SCAN_LIMIT, window.stuckScanned);
   }
   if (window.detailTruncated) {
-    warnTruncated(factory, 'detail', detail.bound, detail.fetched);
+    warnTruncated(factory, 'detail', limit, detail.cutFetched, detail.cutBound);
   }
   if (detail.crashedUnavailable) {
     factory.io.event(
@@ -162,9 +163,9 @@ async function attachErrorSignatures(
   records: ExecutionRecord[],
   opts: { workflowId?: string; limit: number; since?: number },
 ): Promise<DetailResult> {
-  const result: DetailResult = { pages: 0, truncated: false, fetched: 0, bound: 0, crashedUnavailable: false };
+  const result: DetailResult = { pages: 0, truncated: false, cutBound: 0, cutFetched: 0, crashedUnavailable: false };
   const failedById = new Map<string, ExecutionRecord>();
-  const failedPerStatus = new Map<string, number>();
+  const failedPerStatus = new Map<StatusBucket, number>();
   for (const r of records) {
     const bucket = toBucket(r.status);
     if (!FAILED_BUCKETS.has(bucket)) continue;
@@ -209,10 +210,14 @@ async function attachErrorSignatures(
       const record = failedById.get(id);
       if (record !== undefined && error !== null) record.error = error;
     }
-    result.bound += bound;
     result.pages += detail.pages;
-    result.truncated ||= detail.truncated;
-    result.fetched += detail.items.length;
+    if (detail.truncated) {
+      // Only the passes that were cut describe the cut: a pass that ended early
+      // must not inflate the bound or the count the warning reports.
+      result.truncated = true;
+      result.cutBound += bound;
+      result.cutFetched += detail.items.length;
+    }
   }
   return result;
 }
@@ -220,9 +225,9 @@ async function attachErrorSignatures(
 interface DetailResult {
   pages: number;
   truncated: boolean;
-  fetched: number;
-  /** Sum of the per-pass row bounds that ran: pass-1 failures + DETAIL_SLACK, at most --limit. */
-  bound: number;
+  /** Over the passes that were cut: their row bounds (pass-1 failures + DETAIL_SLACK, at most --limit) and rows read. */
+  cutBound: number;
+  cutFetched: number;
   crashedUnavailable: boolean;
 }
 
@@ -247,14 +252,18 @@ function warnTruncated(
   scope: 'window' | 'stuck' | 'detail',
   limit: number,
   fetched: number,
+  bound?: number,
 ): void {
   const texts = {
     window: `warning: window cut at --limit ${limit} (${fetched} executions scanned); raise --limit or narrow --since for the full window`,
     stuck: `warning: active scan hit its cap of ${limit} per status (${fetched} running/waiting scanned); the stuck list may be incomplete`,
-    detail: `warning: error-detail pass stopped at its bound of ${limit} rows (pass-1 failures + ${DETAIL_SLACK}, at most --limit; ${fetched} read with data); some failures count as withoutDetail`,
+    detail: `warning: error-detail pass stopped at its bound of ${bound} rows (pass-1 failures + ${DETAIL_SLACK}, at most --limit ${limit}; ${fetched} read with data); some failures count as withoutDetail`,
   };
   const text = texts[scope];
-  factory.io.event('execution-stats-truncated', { level: 'warn', scope, limit, fetched }, text);
+  // `limit` is always the scope's configured cap (--limit, or the stuck scan cap);
+  // the detail scope adds the computed `bound` that actually cut it.
+  const payload = bound === undefined ? { level: 'warn', scope, limit, fetched } : { level: 'warn', scope, limit, fetched, bound };
+  factory.io.event('execution-stats-truncated', payload, text);
 }
 
 // No message or node column on purpose: no execution-data string reaches the table.

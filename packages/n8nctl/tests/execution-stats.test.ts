@@ -497,6 +497,11 @@ describe('sanitization', () => {
     [j('login pass', 'word: abcdefghijklmnop1234:TAILPART6'), 'TAILPART6'],
     ['Incorrect API key provided: "Zk3jH8aPq9LmX2vB7nQwErTy"', 'Zk3jH8aPq9LmX2vB7nQwErTy'],
     ["API key you've provided: abcdefghijklmnopqrstuvwx", 'abcdefghijklmnopqrstuvwx'],
+    // Round-4 review: a quoted multi-word value is taken to its closing quote.
+    [j('login pass', 'word: "Abcdefghijklmnop correct horse" more'), 'correct horse'],
+    [j('login pass', "word: 'Abcdefghijklmnop battery staple' more"), 'battery staple'],
+    [j('vault sec', 'ret = `abcdefghijklmnopqrst uvw tailq9`'), 'tailq9'],
+    [j('vault sec', 'ret = "abcdefghijklmnopqrst unterminated tail8'), 'tail8'],
   ];
 
   it.each(SECRETS)('should remove the secret from message, sample and node label when text is %j', (text, secret) => {
@@ -573,6 +578,8 @@ describe('sanitization', () => {
     ['api key + words', `api key${' x'.repeat(32_000)}`],
     ['-u + equals', `-u${'='.repeat(65_000)}x`],
     ['-u space + equals', ` -u ${'='.repeat(65_000)}x`],
+    ['quoted value + escapes', `token "${'abcdefghijklmnop'}${'\\"'.repeat(30_000)}`],
+    ['repeated quoted values', 'token: "abcdefghijklmnopq" '.repeat(2_500)],
   ])('should sanitize a 64 KB adversarial %s input in linear time', (_label, input) => {
     const start = performance.now();
     sanitizeText(input);

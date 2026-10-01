@@ -355,10 +355,14 @@ const KEY_VALUE_RE = new RegExp(
  * Every whitespace run is bounded and the two separator forms do not chain
  * quantifiers, so a long run of spaces after a secret word stays linear.
  */
+const TOKEN_AHEAD = String.raw`(?=[A-Za-z0-9._~+/=-]{16})`;
 const SECRET_PHRASE_RE = new RegExp(
   String.raw`\b((?:api[ _-]?key|access[ _-]?key|secret[ _-]?key|token|secret|password|passphrase|credentials?|auth(?:entication|orization)?)\b` +
-    String.raw`(?:[ \t]{1,4}[A-Za-z']{1,20}){0,3}?(?:[ \t]{0,4}[:=][ \t]{0,4}|[ \t]{1,4})["'\x60]?)` +
-    String.raw`(?=[A-Za-z0-9._~+/=-]{16})[^\s,;&'"\x60\\]+`,
+    String.raw`(?:[ \t]{1,4}[A-Za-z']{1,20}){0,3}?(?:[ \t]{0,4}[:=][ \t]{0,4}|[ \t]{1,4}))` +
+    // A quoted value runs to its closing quote (or the end of the line when
+    // unterminated), so a multi-word passphrase cannot keep its tail.
+    String.raw`(?:"${TOKEN_AHEAD}(?:[^"\\\r\n]|\\.)*"?|'${TOKEN_AHEAD}[^'\r\n]*'?|\x60${TOKEN_AHEAD}[^\x60\r\n]*\x60?` +
+    String.raw`|${TOKEN_AHEAD}[^\s,;&'"\x60\\]+)`,
   'gi',
 );
 
