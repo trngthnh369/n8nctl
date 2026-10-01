@@ -144,6 +144,8 @@ export interface ExecutionStats {
   errorClusters: ErrorCluster[];
   /** Clusters past MAX_ERROR_CLUSTERS, dropped from errorClusters. */
   errorClustersOmitted: number;
+  /** Executions in the omitted clusters, so cluster counts still add up to errorDetail.withDetail. */
+  errorExecutionsOmitted: number;
   errorDetail: { errorExecutions: number; withDetail: number; withoutDetail: number };
 }
 
@@ -876,6 +878,7 @@ export function computeExecutionStats(
     stuck,
     errorClusters: errorClusters.slice(0, MAX_ERROR_CLUSTERS),
     errorClustersOmitted: Math.max(0, errorClusters.length - MAX_ERROR_CLUSTERS),
+    errorExecutionsOmitted: errorClusters.slice(MAX_ERROR_CLUSTERS).reduce((sum, c) => sum + c.count, 0),
     errorDetail,
   };
 }

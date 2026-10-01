@@ -291,6 +291,7 @@ describe('execution stats handler', () => {
       'stuck',
       'errorClusters',
       'errorClustersOmitted',
+      'errorExecutionsOmitted',
       'errorDetail',
     ]);
     expect(Object.keys(out.window)).toEqual(WINDOW_KEYS);

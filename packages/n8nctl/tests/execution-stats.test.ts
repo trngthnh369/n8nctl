@@ -684,11 +684,17 @@ describe('computeExecutionStats - error cluster cap', () => {
 
     expect(out.errorClusters).toHaveLength(MAX_ERROR_CLUSTERS);
     expect(out.errorClustersOmitted).toBe(10);
+    expect(out.errorExecutionsOmitted).toBe(10);
     expect(out.errorClusters[0]).toMatchObject({ message: 'failure aa', count: 2 });
+    const kept = out.errorClusters.reduce((sum, c) => sum + c.count, 0);
+    expect(kept + out.errorExecutionsOmitted).toBe(out.errorDetail.withDetail);
   });
 
   it('should report zero omitted when the clusters fit', () => {
-    expect(stats([failed({ node: 'HTTP', message: 'boom' })]).errorClustersOmitted).toBe(0);
+    const out = stats([failed({ node: 'HTTP', message: 'boom' })]);
+
+    expect(out.errorClustersOmitted).toBe(0);
+    expect(out.errorExecutionsOmitted).toBe(0);
   });
 });
 
