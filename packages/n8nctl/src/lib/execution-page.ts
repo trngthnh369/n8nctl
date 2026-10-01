@@ -1,5 +1,5 @@
 import type { N8nClient } from './api.js';
-import type { Execution, ExecutionStatus } from '../types/n8n.js';
+import type { ExecutionStatus } from '../types/n8n.js';
 import { ApiError } from './errors.js';
 
 /** Rows requested per page when the caller does not say. */
@@ -41,8 +41,8 @@ const LOOP_HINT =
  * following `nextCursor` until the window ends, and map every kept row through
  * `map` at once so only mapped values are held.
  *
- * `map` receives the raw row unvalidated: the `Execution` type is a claim, not
- * a check. Only `id` and `startedAt` are read here, and a row with a null or
+ * `map` receives the raw row unvalidated, typed `unknown` because the API
+ * shape is a claim, not a check. Only `id` and `startedAt` are read here, and a row with a null or
  * unparseable `startedAt` is kept, so the mapper must tolerate missing fields.
  * Anything the mapper throws becomes a protocol error naming the row index.
  *
@@ -96,7 +96,7 @@ const LOOP_HINT =
 export async function fetchExecutionWindow<R>(
   client: N8nClient,
   opts: ExecutionWindowOptions,
-  map: (raw: Execution) => R,
+  map: (raw: unknown) => R,
 ): Promise<ExecutionWindow<R>> {
   const { limit } = opts;
   if (!Number.isSafeInteger(limit) || limit < 1) {
@@ -193,9 +193,9 @@ function readPage(body: unknown): Page {
   throw protocolError(SHAPE_MESSAGE, SHAPE_HINT);
 }
 
-function mapRow<R>(map: (raw: Execution) => R, raw: unknown, index: number, page: number): R {
+function mapRow<R>(map: (raw: unknown) => R, raw: unknown, index: number, page: number): R {
   try {
-    return map(raw as Execution);
+    return map(raw);
   } catch {
     // The mapper's own message may quote the row, so it is not forwarded.
     throw protocolError(`${SHAPE_MESSAGE}: row at index ${index} of page ${page} could not be read`, SHAPE_HINT);

@@ -516,6 +516,29 @@ describe('execution stats handler', () => {
     expect(out.totals.count).toBe(1);
   });
 
+  it('should warn with scope detail when pass 2 is cut at --limit', async () => {
+    const env = makeFakeFactory({ json: true, logFormat: 'ndjson' });
+    const e1 = finished('e1', 'w1', 'error', HOUR, 10);
+    routeExecutions(env, {
+      summary: [e1],
+      detail: [
+        { ...finished('late', 'w1', 'error', MINUTE, 10), data: errorData('arrived between passes', 'Late') },
+        { ...e1, data: errorData('real failure', 'HTTP') },
+      ],
+    });
+
+    await executionStatsHandler(env.factory, { limit: '1' }, []);
+    const out = JSON.parse(env.stdout());
+
+    expect(out.window).toMatchObject({ detailTruncated: true });
+    expect(env.events).toContainEqual(
+      expect.objectContaining({
+        event: 'execution-stats-truncated',
+        payload: { level: 'warn', scope: 'detail', limit: 1, fetched: 1 },
+      }),
+    );
+  });
+
   it('should stop pass 2 at the oldest pass-1 startedAt when older error pages follow', async () => {
     const env = makeFakeFactory({ json: true });
     const e1 = finished('e1', 'w1', 'error', HOUR, 10);

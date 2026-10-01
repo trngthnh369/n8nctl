@@ -10,12 +10,12 @@ import {
   extractErrorSignature,
   parseDuration,
   parseSince,
+  toBucket,
   toExecutionRecord,
   type ErrorSignature,
   type ExecutionRecord,
   type ExecutionStats,
   type GroupStats,
-  type StatusBucket,
 } from '../../lib/execution-stats.js';
 import type { N8nClient } from '../../lib/api.js';
 import type { Factory } from '../../factory.js';
@@ -87,16 +87,10 @@ export async function executionStatsHandler(
 
   // Active scan: stuck runs are the oldest rows, exactly the ones --since and
   // --limit cut first, so they are scanned separately with no since cutoff.
-  const running = await fetchExecutionWindow(
-    client,
-    { workflowId, status: 'running', limit: STUCK_SCAN_LIMIT },
-    toExecutionRecord,
-  );
-  const waiting = await fetchExecutionWindow(
-    client,
-    { workflowId, status: 'waiting', limit: STUCK_SCAN_LIMIT },
-    toExecutionRecord,
-  );
+  const [running, waiting] = await Promise.all([
+    fetchExecutionWindow(client, { workflowId, status: 'running', limit: STUCK_SCAN_LIMIT }, toExecutionRecord),
+    fetchExecutionWindow(client, { workflowId, status: 'waiting', limit: STUCK_SCAN_LIMIT }, toExecutionRecord),
+  ]);
 
   const startedRange = startedAtRange(summary.items);
   const detail = await attachErrorSignatures(client, summary.items, {
@@ -137,6 +131,9 @@ export async function executionStatsHandler(
   if (window.stuckTruncated) {
     warnTruncated(factory, 'stuck', STUCK_SCAN_LIMIT, window.stuckScanned);
   }
+  if (window.detailTruncated) {
+    warnTruncated(factory, 'detail', limit, detail.fetched);
+  }
 
   const report: StatsReport = { window, ...stats };
   await printData(report, { io: factory.io, opts: factory.flags }, tableView);
@@ -152,12 +149,12 @@ async function attachErrorSignatures(
   client: N8nClient,
   records: ExecutionRecord[],
   opts: { workflowId?: string; limit: number; since?: number },
-): Promise<{ pages: number; truncated: boolean }> {
+): Promise<{ pages: number; truncated: boolean; fetched: number }> {
   const failedById = new Map<string, ExecutionRecord>();
   for (const r of records) {
-    if (FAILED_BUCKETS.has(r.status?.toLowerCase() as StatusBucket)) failedById.set(r.id, r);
+    if (FAILED_BUCKETS.has(toBucket(r.status))) failedById.set(r.id, r);
   }
-  if (failedById.size === 0) return { pages: 0, truncated: false };
+  if (failedById.size === 0) return { pages: 0, truncated: false, fetched: 0 };
 
   const detail = await fetchExecutionWindow(
     client,
@@ -169,16 +166,17 @@ async function attachErrorSignatures(
       since: opts.since,
       pageSize: DETAIL_PAGE_SIZE,
     },
-    (e): { id: string; error: ErrorSignature | null } => ({
-      id: toExecutionRecord(e).id,
-      error: extractErrorSignature(e.data),
-    }),
+    (e): { id: string; error: ErrorSignature | null } => {
+      // toExecutionRecord throws first on a non-object row, so e has keys here.
+      const { id } = toExecutionRecord(e);
+      return { id, error: extractErrorSignature((e as { data?: unknown }).data) };
+    },
   );
   for (const { id, error } of detail.items) {
     const record = failedById.get(id);
     if (record !== undefined && error !== null) record.error = error;
   }
-  return { pages: detail.pages, truncated: detail.truncated };
+  return { pages: detail.pages, truncated: detail.truncated, fetched: detail.items.length };
 }
 
 function startedAtRange(
@@ -199,14 +197,16 @@ function startedAtRange(
 // Through io.event, never a raw stderr write, so --log-format ndjson stays valid.
 function warnTruncated(
   factory: Factory,
-  scope: 'window' | 'stuck',
+  scope: 'window' | 'stuck' | 'detail',
   limit: number,
   fetched: number,
 ): void {
-  const text =
-    scope === 'window'
-      ? `warning: window cut at --limit ${limit} (${fetched} executions scanned); raise --limit or narrow --since for the full window`
-      : `warning: active scan hit its cap of ${limit} per status (${fetched} running/waiting scanned); the stuck list may be incomplete`;
+  const texts = {
+    window: `warning: window cut at --limit ${limit} (${fetched} executions scanned); raise --limit or narrow --since for the full window`,
+    stuck: `warning: active scan hit its cap of ${limit} per status (${fetched} running/waiting scanned); the stuck list may be incomplete`,
+    detail: `warning: error-detail pass cut at --limit ${limit} (${fetched} failed executions read with data); some failures count as withoutDetail`,
+  };
+  const text = texts[scope];
   factory.io.event('execution-stats-truncated', { level: 'warn', scope, limit, fetched }, text);
 }
 

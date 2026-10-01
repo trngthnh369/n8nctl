@@ -170,17 +170,24 @@ function idOrNull(value: unknown): string | null {
  */
 export function toExecutionRecord(e: unknown): ExecutionRecord {
   if (!isRecord(e)) throw new TypeError('execution row is not an object');
-  const id = idOrNull(e.id);
+  const id = cleanOrNull(idOrNull(e.id));
   if (id === null) throw new TypeError('execution row has no string or number id');
   return {
     id,
-    workflowId: idOrNull(e.workflowId),
-    status: stringOrNull(e.status),
-    startedAt: stringOrNull(e.startedAt),
-    stoppedAt: stringOrNull(e.stoppedAt),
-    waitTill: stringOrNull(e.waitTill),
+    workflowId: cleanOrNull(idOrNull(e.workflowId)),
+    status: cleanOrNull(stringOrNull(e.status)),
+    startedAt: cleanOrNull(stringOrNull(e.startedAt)),
+    stoppedAt: cleanOrNull(stringOrNull(e.stoppedAt)),
+    waitTill: cleanOrNull(stringOrNull(e.waitTill)),
     error: null,
   };
+}
+
+/** Server strings reach --json and --template unescaped: drop control and format characters. */
+function cleanOrNull(value: string | null): string | null {
+  if (value === null) return null;
+  const clean = stripUnsafeChars(value);
+  return clean === '' ? null : clean;
 }
 
 // ---------------------------------------------------------------------------
@@ -188,11 +195,39 @@ export function toExecutionRecord(e: unknown): ExecutionRecord {
 
 /**
  * Raw input is cut to this length BEFORE any regex runs, so the cost of
- * sanitizing is bounded whatever an execution echoes into its error. A cut
- * can only drop text, never expose it: the surviving head is sanitized in
- * full. The outputs read at most MAX_SIGNATURE_LEN chars, far below this.
+ * sanitizing is bounded whatever an execution echoes into its error. The
+ * surviving head is sanitized in full (see capRawText for the cut itself).
+ * The outputs read at most MAX_SIGNATURE_LEN chars, far below this.
  */
 const MAX_RAW_TEXT_LEN = 64 * 1024;
+/**
+ * A cut at MAX_RAW_TEXT_LEN can split a token below its pattern's minimum
+ * length, so the visible prefix escapes redaction. A cut input is therefore
+ * backed off to the last delimiter within this many chars, or by all of them.
+ */
+const TRUNCATION_BACKOFF = 256;
+const TOKEN_DELIMITER_RE = /[\s,;&"'()<>[\]{}]/;
+
+function capRawText(s: string): string {
+  if (s.length <= MAX_RAW_TEXT_LEN) return s;
+  const head = s.slice(0, MAX_RAW_TEXT_LEN);
+  for (let i = head.length - 1; i >= head.length - TRUNCATION_BACKOFF; i--) {
+    if (TOKEN_DELIMITER_RE.test(head[i])) return head.slice(0, i);
+  }
+  return head.slice(0, head.length - TRUNCATION_BACKOFF);
+}
+
+/**
+ * Unicode format characters (zero-width, bidi overrides and isolates) and the
+ * line/paragraph separators survive scrubAnsi: they can split a key name so a
+ * pattern misses it, and they spoof terminal output. Stripped locally so the
+ * shared scrubAnsi keeps its behaviour.
+ */
+const FORMAT_CHARS_RE = /[\p{Cf}\u2028\u2029]/gu;
+
+function stripUnsafeChars(s: string): string {
+  return scrubAnsi(s).replace(FORMAT_CHARS_RE, '');
+}
 
 /*
  * ReDoS rule for every pattern below: a pattern may only start on a literal
@@ -207,14 +242,18 @@ const BASIC_AUTH_RE = /\bBasic\s+([A-Za-z0-9+/]{6,}={0,2})/gi;
 const Q = String.raw`\\?["']?`;
 const LOCAL_SECRET_PATTERNS: Array<[RegExp, string]> = [
   // URL userinfo: scheme://user:pass@ or scheme://token@ (scheme length bounded)
-  [/\b([a-z][a-z0-9+.-]{0,31}:\/\/)[^\s/?#@]+@/gi, `$1${REDACTED}@`],
+  // (greedy to the LAST @ before the path, so a password holding @ is covered)
+  [/\b([a-z][a-z0-9+.-]{0,31}:\/\/)[^\s/?#]+@/gi, `$1${REDACTED}@`],
   // Secret query parameters
   [
     /([?&](?:api[_-]?key|apikey|key|auth|token|access[_-]?token|secret|password|sig|signature|x-amz-signature|x-amz-credential|x-amz-security-token)=)[^&#\s]*/gi,
     `$1${REDACTED}`,
   ],
-  // PEM private key, with real newlines or the literal \n of a JSON string
-  [/-----BEGIN [A-Z ]{0,40}PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]{0,40}PRIVATE KEY-----|$)/g, REDACTED],
+  // PEM or PGP private key, with real newlines or the literal \n of a JSON string
+  [
+    /-----BEGIN [A-Z ]{0,40}PRIVATE KEY(?: BLOCK)?-----[\s\S]*?(?:-----END [A-Z ]{0,40}PRIVATE KEY(?: BLOCK)?-----|$)/g,
+    REDACTED,
+  ],
   // redactExecutionData only knows the capitalised form
   [/\bbearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, REDACTED],
   [/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, REDACTED],
@@ -267,7 +306,7 @@ const SECRET_KEY_NAME = 'pass|pwd|secret|token|key|auth|session|cred|signature';
  */
 const KEY_VALUE_RE = new RegExp(
   String.raw`(?<![A-Za-z0-9_-])([A-Za-z0-9_-]{0,30}(?:${SECRET_KEY_NAME})[A-Za-z0-9_-]{0,30})` +
-    String.raw`(${Q}\s*[:=]\s*)(?!\\?["']?\[REDACTED\])` +
+    String.raw`(${Q}\s*(?:=>|->|[:=])\s*)(?!\\?["']?\[REDACTED\])` +
     String.raw`(\\"(?:\\\\(?:\\\\|\\"|[^\\"])|[^\\"]|\\[^\\"])*\\"|"(?:[^"\\]|\\[\s\S])*"|\\?"[^,}\]\r\n]*|'[^']*'|[^\s,;&'"\\]+)`,
   'gi',
 );
@@ -281,8 +320,7 @@ const KEY_VALUE_RE = new RegExp(
  * over-redaction is the accepted failure direction.
  */
 export function sanitizeText(s: string): string {
-  const head = s.length > MAX_RAW_TEXT_LEN ? s.slice(0, MAX_RAW_TEXT_LEN) : s;
-  let out = redactExecutionData(scrubAnsi(head));
+  let out = redactExecutionData(stripUnsafeChars(capRawText(s)));
   out = out.replace(BASIC_AUTH_RE, (match, token: string) =>
     // Real base64 of user:pass nearly always holds an inner upper-case letter,
     // a digit or +/=; "Basic authentication" does not.
@@ -540,7 +578,7 @@ type DurationOutcome = number | 'notFinished' | 'clockSkew' | 'unparseable';
 
 const BUCKET_SET: ReadonlySet<string> = new Set(STATUS_BUCKETS);
 
-function toBucket(status: string | null): StatusBucket {
+export function toBucket(status: string | null): StatusBucket {
   const lower = status?.toLowerCase();
   return lower !== undefined && BUCKET_SET.has(lower) ? (lower as StatusBucket) : 'unknown';
 }

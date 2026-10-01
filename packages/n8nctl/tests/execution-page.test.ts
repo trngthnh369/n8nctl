@@ -33,7 +33,7 @@ function row(id: string, startedAt: string | null = NEW, extra: Record<string, u
   return { id, workflowId: 'wf1', status: 'success', finished: true, mode: 'trigger', startedAt, ...extra };
 }
 
-const toId = (e: Execution) => e.id;
+const toId = (e: unknown) => (e as Execution).id;
 
 describe('fetchExecutionWindow', () => {
   let env: ReturnType<typeof makeClient>;
@@ -277,7 +277,8 @@ describe('fetchExecutionWindow', () => {
       const w = await fetchExecutionWindow(
         env.client,
         { status: 'error', includeData: true, limit: 10, pageSize: 20 },
-        (e) => {
+        (raw) => {
+          const e = raw as Execution;
           seen.push(e.data);
           return { id: e.id };
         },
@@ -412,7 +413,8 @@ describe('fetchExecutionWindow', () => {
         data: [row('3'), row('2'), { id: '1', note: secret }],
         nextCursor: null,
       });
-      const mapper = (e: Execution) => {
+      const mapper = (raw: unknown) => {
+        const e = raw as Execution;
         if (!('startedAt' in e)) throw new TypeError(`bad row ${JSON.stringify(e)}`);
         return e.id;
       };

@@ -403,6 +403,12 @@ const PEM_BEGIN = j('-----BEGIN PRIV', 'ATE KEY-----');
 const PEM_END = j('-----END PRIV', 'ATE KEY-----');
 const RSA_PEM_BEGIN = j('-----BEGIN RSA PRIV', 'ATE KEY-----');
 const RSA_PEM_END = j('-----END RSA PRIV', 'ATE KEY-----');
+const PGP_BEGIN = j('-----BEGIN PGP PRIV', 'ATE KEY BLOCK-----');
+const PGP_END = j('-----END PGP PRIV', 'ATE KEY BLOCK-----');
+// Built from code points so no invisible character sits in the source.
+const ZWSP = String.fromCharCode(0x200b);
+const RLO = String.fromCharCode(0x202e);
+const LINE_SEP = String.fromCharCode(0x2028);
 
 describe('sanitization', () => {
   const SECRETS: Array<[string, string]> = [
@@ -466,6 +472,13 @@ describe('sanitization', () => {
     [String.raw`{"body":"{\"password\":\"hunter2\"}"}`, 'hunter2'],
     ['GET https://host/x?client_secret=abc failed', 'abc'],
     ['url: https://host/x?refresh_token=abc', 'abc'],
+    // Merge review: PGP blocks, an @ inside a URL password, => separators,
+    // and a zero-width char splitting the key name.
+    [j(PGP_BEGIN, '\nlQOYBpgpBody99\n', PGP_END), 'lQOYBpgpBody99'],
+    [j('connect postgres://', 'user:p@ss99', '@db.local/app failed'), 'ss99'],
+    ['config "token" => "arrow-value-1"', 'arrow-value-1'],
+    ['config token -> arrow-value-2', 'arrow-value-2'],
+    [j('query to', ZWSP, 'ken=zw-value-1 failed'), 'zw-value-1'],
   ];
 
   it.each(SECRETS)('should remove the secret from message, sample and node label when text is %j', (text, secret) => {
@@ -509,6 +522,9 @@ describe('sanitization', () => {
     '"a":"',
     `${'a'.repeat(70)}:`,
     PEM_BEGIN,
+    'x://a@',
+    'x://a@@@@',
+    '"token" => "',
   ])(
     'should sanitize 64 KB of repeated %j in linear time',
     (unit) => {
@@ -527,6 +543,23 @@ describe('sanitization', () => {
 
     expect(out.length).toBeLessThanOrEqual(64 * 1024);
     expect(performance.now() - start).toBeLessThan(500);
+  });
+
+  it('should strip bidi overrides and line separators that would spoof terminal output', () => {
+    expect(sanitizeText(j('safe', RLO, 'txt', LINE_SEP, 'end', ZWSP))).toBe('safetxtend');
+  });
+
+  it('should back off a cut that splits a token so no token prefix survives', () => {
+    const token = j('gh', 'p_', 'A'.repeat(36));
+    const filler = 'a '.repeat(Math.ceil((65_536 - 12) / 2)).slice(0, 65_536 - 12);
+    const out = sanitizeText(`${filler}${token} tail`);
+
+    expect(out).not.toContain(j('gh', 'p_'));
+    expect(out.endsWith('a')).toBe(true);
+  });
+
+  it('should drop the last 256 chars of a cut with no delimiter near the end', () => {
+    expect(sanitizeText('a'.repeat(70_000))).toHaveLength(65_536 - 256);
   });
 
   it('should strip an ANSI sequence from a node label', () => {
@@ -806,6 +839,19 @@ describe('parseSince', () => {
 });
 
 describe('toExecutionRecord', () => {
+  it('should strip control and format characters from server strings', () => {
+    const r = toExecutionRecord({
+      id: 'ab\u001b[31mc',
+      workflowId: j('w', RLO, 'f'),
+      status: 'error',
+      startedAt: null,
+      stoppedAt: null,
+      waitTill: j('2026-10-01T00:00:00Z', LINE_SEP),
+    });
+
+    expect(r).toMatchObject({ id: 'abc', workflowId: 'wf', waitTill: '2026-10-01T00:00:00Z' });
+  });
+
   it('should copy the known fields and never copy data', () => {
     const r = toExecutionRecord({
       id: '7',
