@@ -602,6 +602,31 @@ describe('execution stats handler', () => {
     expect(warning?.payload).toMatchObject({ scope: 'detail', bound: 1 + DETAIL_SLACK, fetched: 1 + DETAIL_SLACK });
   });
 
+  it('should warn once per cut pass, each with its own bound, when both passes are cut', async () => {
+    const env = makeFakeFactory({ json: true });
+    const endless = (prefix: string, status: string) => {
+      let page = 0;
+      return (): [number, unknown] => {
+        page++;
+        const data = Array.from({ length: 20 }, (_, i) => finished(`${prefix}${page}-${i}`, 'w1', status, MINUTE, 10));
+        return [200, { data, nextCursor: `${prefix}${page}` }];
+      };
+    };
+    routeExecutions(env, {
+      summary: [finished('e1', 'w1', 'error', HOUR, 10), finished('c1', 'w1', 'crashed', HOUR, 10)],
+      detail: endless('n', 'error'),
+      crashed: endless('k', 'crashed'),
+    });
+
+    await executionStatsHandler(env.factory, { limit: '150' }, []);
+
+    const warnings = env.events.filter((e) => e.event === 'execution-stats-truncated').map((e) => e.payload);
+    expect(warnings).toEqual([
+      { level: 'warn', scope: 'detail', limit: 150, fetched: 101, status: 'error', bound: 101 },
+      { level: 'warn', scope: 'detail', limit: 150, fetched: 101, status: 'crashed', bound: 101 },
+    ]);
+  });
+
   it('should keep error detail when the crashed pass is rejected in the same run', async () => {
     const env = makeFakeFactory({ json: true, logFormat: 'ndjson' });
     const e1 = finished('e1', 'w1', 'error', HOUR, 10);
@@ -674,7 +699,7 @@ describe('execution stats handler', () => {
     expect(env.events).toContainEqual(
       expect.objectContaining({
         event: 'execution-stats-truncated',
-        payload: { level: 'warn', scope: 'detail', limit: 1, fetched: 1, bound: 1 },
+        payload: { level: 'warn', scope: 'detail', limit: 1, fetched: 1, status: 'error', bound: 1 },
       }),
     );
   });

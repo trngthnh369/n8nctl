@@ -138,7 +138,7 @@ export async function executionStatsHandler(
     warnTruncated(factory, 'stuck', STUCK_SCAN_LIMIT, window.stuckScanned);
   }
   if (window.detailTruncated) {
-    warnTruncated(factory, 'detail', limit, detail.cutFetched, detail.cutBound);
+    for (const cut of detail.cuts) warnTruncated(factory, 'detail', limit, cut.fetched, cut);
   }
   if (detail.crashedUnavailable) {
     factory.io.event(
@@ -163,7 +163,7 @@ async function attachErrorSignatures(
   records: ExecutionRecord[],
   opts: { workflowId?: string; limit: number; since?: number },
 ): Promise<DetailResult> {
-  const result: DetailResult = { pages: 0, truncated: false, cutBound: 0, cutFetched: 0, crashedUnavailable: false };
+  const result: DetailResult = { pages: 0, truncated: false, cuts: [], crashedUnavailable: false };
   const failedById = new Map<string, ExecutionRecord>();
   const failedPerStatus = new Map<StatusBucket, number>();
   for (const r of records) {
@@ -212,11 +212,10 @@ async function attachErrorSignatures(
     }
     result.pages += detail.pages;
     if (detail.truncated) {
-      // Only the passes that were cut describe the cut: a pass that ended early
-      // must not inflate the bound or the count the warning reports.
+      // Each cut pass is reported on its own: summing bounds across passes
+      // could exceed --limit and would describe no single pass.
       result.truncated = true;
-      result.cutBound += bound;
-      result.cutFetched += detail.items.length;
+      result.cuts.push({ status, bound, fetched: detail.items.length });
     }
   }
   return result;
@@ -225,9 +224,8 @@ async function attachErrorSignatures(
 interface DetailResult {
   pages: number;
   truncated: boolean;
-  /** Over the passes that were cut: their row bounds (pass-1 failures + DETAIL_SLACK, at most --limit) and rows read. */
-  cutBound: number;
-  cutFetched: number;
+  /** One entry per pass that was cut: its row bound (pass-1 failures + DETAIL_SLACK, at most --limit) and rows read. */
+  cuts: Array<{ status: (typeof DETAIL_STATUSES)[number]; bound: number; fetched: number }>;
   crashedUnavailable: boolean;
 }
 
@@ -252,17 +250,20 @@ function warnTruncated(
   scope: 'window' | 'stuck' | 'detail',
   limit: number,
   fetched: number,
-  bound?: number,
+  cut?: { status: string; bound: number },
 ): void {
   const texts = {
     window: `warning: window cut at --limit ${limit} (${fetched} executions scanned); raise --limit or narrow --since for the full window`,
     stuck: `warning: active scan hit its cap of ${limit} per status (${fetched} running/waiting scanned); the stuck list may be incomplete`,
-    detail: `warning: error-detail pass stopped at its bound of ${bound} rows (pass-1 failures + ${DETAIL_SLACK}, at most --limit ${limit}; ${fetched} read with data); some failures count as withoutDetail`,
+    detail: `warning: ${cut?.status} detail pass stopped at its bound of ${cut?.bound} rows (pass-1 failures + ${DETAIL_SLACK}, at most --limit ${limit}; ${fetched} rows read); some failures count as withoutDetail`,
   };
   const text = texts[scope];
   // `limit` is always the scope's configured cap (--limit, or the stuck scan cap);
-  // the detail scope adds the computed `bound` that actually cut it.
-  const payload = bound === undefined ? { level: 'warn', scope, limit, fetched } : { level: 'warn', scope, limit, fetched, bound };
+  // the detail scope adds which pass was cut and the computed `bound` that cut it.
+  const payload =
+    cut === undefined
+      ? { level: 'warn', scope, limit, fetched }
+      : { level: 'warn', scope, limit, fetched, status: cut.status, bound: cut.bound };
   factory.io.event('execution-stats-truncated', payload, text);
 }
 
