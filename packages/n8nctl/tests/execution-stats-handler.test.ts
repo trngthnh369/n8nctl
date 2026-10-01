@@ -3,6 +3,8 @@ import { makeFakeFactory, type FakeFactory } from './helpers/fake-factory.js';
 import {
   executionStatsHandler,
   STUCK_SCAN_LIMIT,
+  DETAIL_SLACK,
+  DETAIL_PAGE_SIZE,
 } from '../src/commands/execution/stats.js';
 import { createExecutionCommand } from '../src/commands/execution/index.js';
 import { completionHandler } from '../src/commands/completion.js';
@@ -48,7 +50,7 @@ const errorData = (message: string, node?: string): unknown => ({
   resultData: { error: { message, ...(node === undefined ? {} : { node: { name: node } }) } },
 });
 
-type Route = 'summary' | 'running' | 'waiting' | 'detail';
+type Route = 'summary' | 'running' | 'waiting' | 'detail' | 'crashed';
 type Reply = Row[] | ((params: Record<string, unknown>) => [number, unknown]);
 
 /**
@@ -65,6 +67,7 @@ function routeExecutions(
     running: [],
     waiting: [],
     detail: [],
+    crashed: [],
   };
   env.apiMock.onGet('/executions').reply((cfg) => {
     const params = (cfg.params ?? {}) as Record<string, unknown>;
@@ -72,6 +75,7 @@ function routeExecutions(
     if (params.status === 'running') route = 'running';
     else if (params.status === 'waiting') route = 'waiting';
     else if (params.status === 'error' && params.includeData === true) route = 'detail';
+    else if (params.status === 'crashed' && params.includeData === true) route = 'crashed';
     else if (params.status === undefined && params.includeData === undefined) route = 'summary';
     else return [400, { message: `unexpected params ${JSON.stringify(params)}` }];
     calls[route].push(params);
@@ -160,13 +164,12 @@ describe('execution stats handler', () => {
           waitTill: ago(-DAY),
         },
       ],
-      // c1 (crashed) under status=error is a contract test of the id join: whether
-      // n8n's status=error filter returns crashed rows is an open plan gap.
+      // c1 (crashed) gets its detail from the separate status=crashed pass.
       detail: [
         { ...summary[1], data: errorData('Request failed with status code 500 for id abc12345xyz', 'HTTP') },
         { ...summary[4], data: errorData('Request failed with status code 404 for id zz98765qq', 'HTTP') },
-        { ...summary[0], data: errorData('Workflow did crash') },
       ],
+      crashed: [{ ...summary[0], data: errorData('Workflow did crash') }],
     });
 
     await executionStatsHandler(env.factory, {}, []);
@@ -204,7 +207,7 @@ describe('execution stats handler', () => {
       pages: 1,
       truncated: false,
       stopReason: 'end',
-      detailPages: 1,
+      detailPages: 2,
       detailTruncated: false,
       stuckScope: 'active-scan',
       stuckScanned: 3,
@@ -286,6 +289,7 @@ describe('execution stats handler', () => {
       'workflows',
       'stuck',
       'errorClusters',
+      'errorClustersOmitted',
       'errorDetail',
     ]);
     expect(Object.keys(out.window)).toEqual(WINDOW_KEYS);
@@ -526,6 +530,68 @@ describe('execution stats handler', () => {
 
     expect(out.errorClusters).toHaveLength(1);
     expect(out.errorClusters[0]).toMatchObject({ node: 'HTTP', executionIds: ['e1'] });
+  });
+
+  it('should attach detail to a crashed execution through a status=crashed pass', async () => {
+    const env = makeFakeFactory({ json: true });
+    const c1 = finished('c1', 'w1', 'crashed', HOUR, 10);
+    const calls = routeExecutions(env, { summary: [c1], crashed: [{ ...c1, data: errorData('worker died', 'Code') }] });
+
+    await executionStatsHandler(env.factory, {}, []);
+    const out = JSON.parse(env.stdout());
+
+    expect(calls.detail).toHaveLength(0);
+    expect(calls.crashed).toHaveLength(1);
+    expect(out.errorClusters[0]).toMatchObject({ node: 'Code', executionIds: ['c1'] });
+    expect(out.errorDetail).toEqual({ errorExecutions: 1, withDetail: 1, withoutDetail: 0 });
+  });
+
+  it('should warn and count crashed as withoutDetail when the API rejects status=crashed', async () => {
+    const env = makeFakeFactory({ json: true, logFormat: 'ndjson' });
+    const c1 = finished('c1', 'w1', 'crashed', HOUR, 10);
+    routeExecutions(env, { summary: [c1], crashed: () => [400, { message: 'bad status' }] });
+
+    await executionStatsHandler(env.factory, {}, []);
+    const out = JSON.parse(env.stdout());
+
+    expect(out.errorDetail).toEqual({ errorExecutions: 1, withDetail: 0, withoutDetail: 1 });
+    expect(env.events).toContainEqual(
+      expect.objectContaining({
+        event: 'execution-stats-detail-unavailable',
+        payload: { level: 'warn', status: 'crashed' },
+      }),
+    );
+  });
+
+  it('should fail loud when the crashed pass fails with anything but 400', async () => {
+    const env = makeFakeFactory({ json: true });
+    routeExecutions(env, {
+      summary: [finished('c1', 'w1', 'crashed', HOUR, 10)],
+      crashed: () => [500, { message: 'boom' }],
+    });
+
+    await expect(executionStatsHandler(env.factory, {}, [])).rejects.toMatchObject({ name: 'ApiError', status: 500 });
+    expect(env.stdout()).toBe('');
+  });
+
+  it('should bound pass 2 by the pass-1 failure count plus a margin', async () => {
+    const env = makeFakeFactory({ json: true });
+    let page = 0;
+    const calls = routeExecutions(env, {
+      summary: [finished('e1', 'w1', 'error', HOUR, 10)],
+      // Endless newer error rows: without the bound pass 2 would page to --limit.
+      detail: () => {
+        page++;
+        const data = Array.from({ length: 20 }, (_, i) => finished(`n${page}-${i}`, 'w1', 'error', MINUTE, 10));
+        return [200, { data, nextCursor: `c${page}` }];
+      },
+    });
+
+    await executionStatsHandler(env.factory, {}, []);
+    const out = JSON.parse(env.stdout());
+
+    expect(calls.detail).toHaveLength(Math.ceil((1 + DETAIL_SLACK) / DETAIL_PAGE_SIZE));
+    expect(out.window.detailTruncated).toBe(true);
   });
 
   it('should warn with scope detail when pass 2 is cut at --limit', async () => {

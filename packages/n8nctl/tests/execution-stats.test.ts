@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  MAX_ERROR_CLUSTERS,
   STATUS_BUCKETS,
   UNKNOWN_WORKFLOW,
   computeExecutionStats,
@@ -409,6 +410,7 @@ const PGP_END = j('-----END PGP PRIV', 'ATE KEY BLOCK-----');
 const ZWSP = String.fromCharCode(0x200b);
 const RLO = String.fromCharCode(0x202e);
 const LINE_SEP = String.fromCharCode(0x2028);
+const CGJ = String.fromCharCode(0x034f);
 
 describe('sanitization', () => {
   const SECRETS: Array<[string, string]> = [
@@ -479,6 +481,15 @@ describe('sanitization', () => {
     ['config "token" => "arrow-value-1"', 'arrow-value-1'],
     ['config token -> arrow-value-2', 'arrow-value-2'],
     [j('query to', ZWSP, 'ken=zw-value-1 failed'), 'zw-value-1'],
+    // Merge review round 2: invisible combining filler, opaque free-text
+    // tokens, schemeless userinfo, curl -u, and two more prefixes.
+    [j('login pass', CGJ, 'word=cv-value-1 failed'), 'cv-value-1'],
+    ['Incorrect API key provided: abcdefghijklmnopqrstuvwx', 'abcdefghijklmnopqrstuvwx'],
+    ['auth failed for abcdefghijklmnopqrstuv', 'abcdefghijklmnopqrstuv'],
+    [j('curl -u adm', 'in:pw-value-curl1 https://x.local'), 'pw-value-curl1'],
+    [j('login admin:', 'pw-value-sl1', '@db.local failed'), 'pw-value-sl1'],
+    [j('oauth ya', '29.', 'abcdefghijklmnopqrstuvwx denied'), j('ya', '29.', 'abcdefghijklmnopqrstuvwx')],
+    [j('stripe sk', '_test_', 'abcdefghijklmnop12 denied'), j('sk', '_test_', 'abcdefghijklmnop12')],
   ];
 
   it.each(SECRETS)('should remove the secret from message, sample and node label when text is %j', (text, secret) => {
@@ -506,6 +517,12 @@ describe('sanitization', () => {
     expect(sanitizeText('Request to https://api.example.com/v1 failed')).toBe(
       'Request to https://api.example.com/v1 failed',
     );
+    expect(sanitizeText('{"url":"https://api.x.com","owner":"bob@x.com"}')).toBe(
+      '{"url":"https://api.x.com","owner":"bob@x.com"}',
+    );
+    expect(sanitizeText('token expired')).toBe('token expired');
+    expect(sanitizeText('password must be at least 8 characters')).toBe('password must be at least 8 characters');
+    expect(sanitizeText('Lỗi xác thực: người dùng không hợp lệ')).toBe('Lỗi xác thực: người dùng không hợp lệ');
   });
 
   // Regression: the URL-userinfo scheme class was unbounded, making every
@@ -525,6 +542,10 @@ describe('sanitization', () => {
     'x://a@',
     'x://a@@@@',
     '"token" => "',
+    'token a ',
+    'api key x y z ',
+    'x:y@',
+    ' -u a:',
   ])(
     'should sanitize 64 KB of repeated %j in linear time',
     (unit) => {
@@ -618,6 +639,27 @@ describe('sampleMessage', () => {
 
   it('should truncate to 300 chars', () => {
     expect(sampleMessage('y'.repeat(1000))).toHaveLength(300);
+  });
+});
+
+describe('computeExecutionStats - error cluster cap', () => {
+  it('should keep the top MAX_ERROR_CLUSTERS clusters and count the rest as omitted', () => {
+    const letters = (i: number) => String.fromCharCode(97 + (i % 26), 97 + Math.floor(i / 26));
+    const records = Array.from({ length: MAX_ERROR_CLUSTERS + 10 }, (_, i) =>
+      failed({ node: 'HTTP', message: `failure ${letters(i)}` }),
+    );
+    // One cluster with two members must survive the cut as the largest.
+    records.push(failed({ node: 'HTTP', message: `failure ${letters(0)}` }));
+
+    const out = stats(records);
+
+    expect(out.errorClusters).toHaveLength(MAX_ERROR_CLUSTERS);
+    expect(out.errorClustersOmitted).toBe(10);
+    expect(out.errorClusters[0]).toMatchObject({ message: 'failure aa', count: 2 });
+  });
+
+  it('should report zero omitted when the clusters fit', () => {
+    expect(stats([failed({ node: 'HTTP', message: 'boom' })]).errorClustersOmitted).toBe(0);
   });
 });
 

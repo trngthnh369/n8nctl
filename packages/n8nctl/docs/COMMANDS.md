@@ -178,7 +178,7 @@ Retry a failed execution (uses the internal /rest API — requires `n8nctl auth 
 
 ### `execution stats`
 
-Aggregate executions: per-workflow status counts + failure rate and duration p50/p95 over a window, stuck running/waiting executions (scanned separately, not limited by the window), and error clusters (node + normalized message). Read-only; error text is redacted.
+Aggregate executions: per-workflow status counts + failure rate and duration p50/p95 over a window, stuck running/waiting executions (scanned separately, not limited by the window, capped at 500 per status newest first: when cut, stuck holds the newest and a warning says so), and the top 50 error clusters (node + normalized message). Read-only; error text is redacted.
 
   - `--workflow <id>` — Filter to one workflow
   - `--since <when>` — Window start: a duration ago (30m, 24h, 7d) or an ISO-8601 time with Z or an offset, or a YYYY-MM-DD date (UTC); client-side cutoff

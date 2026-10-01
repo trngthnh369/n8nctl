@@ -2,10 +2,10 @@ import { Command } from 'commander';
 import { withAction } from '../../lib/runtime.js';
 import { printData } from '../../lib/output.js';
 import { parsePositiveInt } from '../../lib/util.js';
-import { ValidationError } from '../../lib/errors.js';
+import { ApiError, ValidationError } from '../../lib/errors.js';
 import { fetchExecutionWindow, type WindowStopReason } from '../../lib/execution-page.js';
 import {
-  FAILED_BUCKETS,
+  MAX_ERROR_CLUSTERS,
   computeExecutionStats,
   extractErrorSignature,
   parseDuration,
@@ -34,6 +34,8 @@ export const DEFAULT_STUCK_AFTER_MS = 3_600_000;
 export const DETAIL_PAGE_SIZE = 20;
 /** Cap per active-scan status (running, waiting); hitting it sets stuckTruncated. */
 export const STUCK_SCAN_LIMIT = 500;
+/** Margin over the pass-1 failure count for rows that arrive between the passes. */
+export const DETAIL_SLACK = 100;
 
 /** The `window` object of the `--json` output: every key always present. */
 interface StatsWindow {
@@ -134,6 +136,13 @@ export async function executionStatsHandler(
   if (window.detailTruncated) {
     warnTruncated(factory, 'detail', limit, detail.fetched);
   }
+  if (detail.crashedUnavailable) {
+    factory.io.event(
+      'execution-stats-detail-unavailable',
+      { level: 'warn', status: 'crashed' },
+      'warning: the API rejected status=crashed as a filter; crashed executions count as withoutDetail',
+    );
+  }
 
   const report: StatsReport = { window, ...stats };
   await printData(report, { io: factory.io, opts: factory.flags }, tableView);
@@ -149,34 +158,63 @@ async function attachErrorSignatures(
   client: N8nClient,
   records: ExecutionRecord[],
   opts: { workflowId?: string; limit: number; since?: number },
-): Promise<{ pages: number; truncated: boolean; fetched: number }> {
+): Promise<DetailResult> {
+  const result: DetailResult = { pages: 0, truncated: false, fetched: 0, crashedUnavailable: false };
   const failedById = new Map<string, ExecutionRecord>();
+  const failedPerStatus = new Map<'error' | 'crashed', number>();
   for (const r of records) {
-    if (FAILED_BUCKETS.has(toBucket(r.status))) failedById.set(r.id, r);
+    const bucket = toBucket(r.status);
+    if (bucket !== 'error' && bucket !== 'crashed') continue;
+    failedById.set(r.id, r);
+    failedPerStatus.set(bucket, (failedPerStatus.get(bucket) ?? 0) + 1);
   }
-  if (failedById.size === 0) return { pages: 0, truncated: false, fetched: 0 };
 
-  const detail = await fetchExecutionWindow(
-    client,
-    {
-      workflowId: opts.workflowId,
-      status: 'error',
-      includeData: true,
-      limit: opts.limit,
-      since: opts.since,
-      pageSize: DETAIL_PAGE_SIZE,
-    },
-    (e): { id: string; error: ErrorSignature | null } => {
-      // toExecutionRecord throws first on a non-object row, so e has keys here.
-      const { id } = toExecutionRecord(e);
-      return { id, error: extractErrorSignature((e as { data?: unknown }).data) };
-    },
-  );
-  for (const { id, error } of detail.items) {
-    const record = failedById.get(id);
-    if (record !== undefined && error !== null) record.error = error;
+  for (const [status, failed] of failedPerStatus) {
+    let detail;
+    try {
+      detail = await fetchExecutionWindow(
+        client,
+        {
+          workflowId: opts.workflowId,
+          status,
+          includeData: true,
+          // Rows newer than pass 1 come first; past them, only pass-1 failures
+          // can match, so the scan stops after that many plus a margin.
+          limit: Math.min(opts.limit, failed + DETAIL_SLACK),
+          since: opts.since,
+          pageSize: DETAIL_PAGE_SIZE,
+        },
+        (e): { id: string; error: ErrorSignature | null } => {
+          // toExecutionRecord throws first on a non-object row, so e has keys here.
+          const { id } = toExecutionRecord(e);
+          return { id, error: extractErrorSignature((e as { data?: unknown }).data) };
+        },
+      );
+    } catch (err) {
+      // Not every n8n version accepts status=crashed as a filter (unverified):
+      // a 400 there degrades to "no detail for crashed", anything else fails loud.
+      if (status === 'crashed' && err instanceof ApiError && err.status === 400) {
+        result.crashedUnavailable = true;
+        continue;
+      }
+      throw err;
+    }
+    for (const { id, error } of detail.items) {
+      const record = failedById.get(id);
+      if (record !== undefined && error !== null) record.error = error;
+    }
+    result.pages += detail.pages;
+    result.truncated ||= detail.truncated;
+    result.fetched += detail.items.length;
   }
-  return { pages: detail.pages, truncated: detail.truncated, fetched: detail.items.length };
+  return result;
+}
+
+interface DetailResult {
+  pages: number;
+  truncated: boolean;
+  fetched: number;
+  crashedUnavailable: boolean;
 }
 
 function startedAtRange(
@@ -237,7 +275,7 @@ function formatMs(ms: number | null): string {
 export function createStatsCommand(): Command {
   return new Command('stats')
     .description(
-      'Aggregate executions: per-workflow status counts + failure rate and duration p50/p95 over a window, stuck running/waiting executions (scanned separately, not limited by the window), and error clusters (node + normalized message). Read-only; error text is redacted.',
+      `Aggregate executions: per-workflow status counts + failure rate and duration p50/p95 over a window, stuck running/waiting executions (scanned separately, not limited by the window, capped at ${STUCK_SCAN_LIMIT} per status newest first: when cut, stuck holds the newest and a warning says so), and the top ${MAX_ERROR_CLUSTERS} error clusters (node + normalized message). Read-only; error text is redacted.`,
     )
     .option('--workflow <id>', 'Filter to one workflow')
     .option(

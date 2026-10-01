@@ -140,9 +140,15 @@ export interface ExecutionStats {
   totals: GroupStats;
   workflows: WorkflowStats[];
   stuck: StuckExecution[];
+  /** The MAX_ERROR_CLUSTERS largest clusters, in compareClusters order. */
   errorClusters: ErrorCluster[];
+  /** Clusters past MAX_ERROR_CLUSTERS, dropped from errorClusters. */
+  errorClustersOmitted: number;
   errorDetail: { errorExecutions: number; withDetail: number; withoutDetail: number };
 }
+
+/** All-distinct messages (HTML bodies) would otherwise make one cluster per failure. */
+export const MAX_ERROR_CLUSTERS = 50;
 
 // ---------------------------------------------------------------------------
 // Records
@@ -232,10 +238,14 @@ function capRawText(s: string): string {
 /**
  * Unicode format characters (zero-width, bidi overrides and isolates) and the
  * line/paragraph separators survive scrubAnsi: they can split a key name so a
- * pattern misses it, and they spoof terminal output. Stripped locally so the
- * shared scrubAnsi keeps its behaviour.
+ * pattern misses it, and they spoof terminal output. The rest are invisible
+ * fillers outside Cf (combining grapheme joiner, Hangul and Khmer fillers,
+ * Mongolian and standard variation selectors); visible combining marks such
+ * as Vietnamese diacritics are kept. Stripped locally so the shared scrubAnsi
+ * keeps its behaviour.
  */
-const FORMAT_CHARS_RE = /[\p{Cf}\u2028\u2029]/gu;
+const FORMAT_CHARS_RE =
+  /[\p{Cf}\u2028\u2029\u034F\u115F\u1160\u17B4\u17B5\u180B-\u180D\u180F\u3164\uFE00-\uFE0F\uFFA0\u{E0100}-\u{E01EF}]/gu;
 
 function stripUnsafeChars(s: string): string {
   return scrubAnsi(s).replace(FORMAT_CHARS_RE, '');
@@ -254,8 +264,18 @@ const BASIC_AUTH_RE = /\bBasic\s+([A-Za-z0-9+/]{6,}={0,2})/gi;
 const Q = String.raw`\\?["']?`;
 const LOCAL_SECRET_PATTERNS: Array<[RegExp, string]> = [
   // URL userinfo: scheme://user:pass@ or scheme://token@ (scheme length bounded)
-  // (greedy to the LAST @ before the path, so a password holding @ is covered)
-  [/\b([a-z][a-z0-9+.-]{0,31}:\/\/)[^\s/?#]+@/gi, `$1${REDACTED}@`],
+  // (greedy to the LAST @ before the path, so a password holding @ is covered;
+  // quotes, commas and angle brackets end it, so a host-only URL in compact
+  // JSON does not swallow a later email: a password holding those chars is
+  // the accepted miss)
+  [/\b([a-z][a-z0-9+.-]{0,31}:\/\/)[^\s/?#"',;<>]+@/gi, `$1${REDACTED}@`],
+  // Schemeless user:password@host (connection strings without a scheme)
+  [/(?<![\w.+-])[\w.+-]{1,64}:[^\s@/:"',;<>]{1,128}@(?=[A-Za-z0-9-]+\.[A-Za-z0-9.-]+)/g, `${REDACTED}@`],
+  // curl -u user:password / --user=user:password
+  [/((?:^|\s)(?:-u|--user)[\s=]+)[^\s:]+:\S+/g, `$1${REDACTED}`],
+  // Google OAuth access tokens and Stripe test keys (the shared list has live keys)
+  [/\bya29\.[A-Za-z0-9_-]{20,}/g, REDACTED],
+  [/\b[rs]k_test_[A-Za-z0-9]{16,}/g, REDACTED],
   // Secret query parameters
   [
     /([?&](?:api[_-]?key|apikey|key|auth|token|access[_-]?token|secret|password|sig|signature|x-amz-signature|x-amz-credential|x-amz-security-token)=)[^&#\s]*/gi,
@@ -324,6 +344,19 @@ const KEY_VALUE_RE = new RegExp(
 );
 
 /**
+ * Free-text secrets with no key=value shape and no known prefix, such as
+ * "Incorrect API key provided: <opaque>": a secret word, up to three short
+ * words, an optional : or =, then a token-like run of 16+ chars. The length
+ * floor keeps ordinary phrases ("token expired", "password must be 8 chars")
+ * readable; a long plain word after a secret word is the accepted over-redaction.
+ */
+const SECRET_PHRASE_RE = new RegExp(
+  String.raw`\b((?:api[ _-]?key|access[ _-]?key|secret[ _-]?key|token|secret|password|passphrase|credentials?|auth(?:entication|orization)?)\b` +
+    String.raw`(?:[ \t]+[A-Za-z]{1,20}){0,3}?[ \t]*[:=]?[ \t]+)(?!\[REDACTED\])[A-Za-z0-9._~+/=-]{16,}`,
+  'gi',
+);
+
+/**
  * Make a string from execution data safe to print: cap the raw length, then
  * scrub ANSI and control characters FIRST (redacting first would let an ANSI
  * sequence split a token so the pattern misses it, and the later scrub would
@@ -341,6 +374,7 @@ export function sanitizeText(s: string): string {
   for (const [re, replacement] of LOCAL_SECRET_PATTERNS) {
     out = out.replace(re, replacement);
   }
+  out = out.replace(SECRET_PHRASE_RE, `$1${REDACTED}`);
   return out.replace(KEY_VALUE_RE, `$1$2${REDACTED}`);
 }
 
@@ -824,12 +858,14 @@ export function computeExecutionStats(
         b.failed - a.failed || b.count - a.count || compareStrings(a.workflowId, b.workflowId),
     );
 
+  const errorClusters = [...clusters.values()].map(finalizeCluster).sort(compareClusters);
   return {
     stuckAfterMs,
     totals: finalize(totals),
     workflows,
     stuck,
-    errorClusters: [...clusters.values()].map(finalizeCluster).sort(compareClusters),
+    errorClusters: errorClusters.slice(0, MAX_ERROR_CLUSTERS),
+    errorClustersOmitted: Math.max(0, errorClusters.length - MAX_ERROR_CLUSTERS),
     errorDetail,
   };
 }
