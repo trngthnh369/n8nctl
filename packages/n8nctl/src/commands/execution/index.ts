@@ -6,6 +6,7 @@ import { createWaitCommand } from './wait.js';
 import { createLastErrorCommand } from './last-error.js';
 import { createLogsCommand } from './logs.js';
 import { createDeleteCommand } from './delete.js';
+import { createStatsCommand } from './stats.js';
 
 export function createExecutionCommand(): Command {
   const cmd = new Command('execution')
@@ -21,5 +22,6 @@ export function createExecutionCommand(): Command {
   cmd.addCommand(createWaitCommand());
   cmd.addCommand(createLastErrorCommand());
   cmd.addCommand(createLogsCommand());
+  cmd.addCommand(createStatsCommand());
   return cmd;
 }
