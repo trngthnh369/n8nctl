@@ -176,6 +176,15 @@ Retry a failed execution (uses the internal /rest API — requires `n8nctl auth 
 
   - `--load-workflow` — Reload the current saved workflow instead of the execution snapshot
 
+### `execution stats`
+
+Aggregate executions: per-workflow status counts + failure rate and duration p50/p95 over a window, stuck running/waiting executions (scanned separately, not limited by the window), and error clusters (node + normalized message). Read-only; error text is redacted.
+
+  - `--workflow <id>` — Filter to one workflow
+  - `--since <when>` — Window start: a duration ago (30m, 24h, 7d) or an ISO-8601 time with Z or an offset, or a YYYY-MM-DD date (UTC); client-side cutoff
+  - `--limit <n>` — Max executions scanned for the window, newest first (default 1000, max 20000)
+  - `--stuck-after <duration>` — Flag running/waiting executions older than this; a unit is required (e.g. 30m, 2h; default 1h)
+
 ### `execution wait <id>`
 
 Poll until an execution reaches a terminal state (success/error/canceled/crashed)
