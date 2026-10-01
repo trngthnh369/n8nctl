@@ -563,6 +563,25 @@ describe('execution stats handler', () => {
     );
   });
 
+  it('should keep error detail when the crashed pass is rejected in the same run', async () => {
+    const env = makeFakeFactory({ json: true, logFormat: 'ndjson' });
+    const e1 = finished('e1', 'w1', 'error', HOUR, 10);
+    const c1 = finished('c1', 'w1', 'crashed', 2 * HOUR, 10);
+    const calls = routeExecutions(env, {
+      summary: [e1, c1],
+      detail: [{ ...e1, data: errorData('boom', 'HTTP') }],
+      crashed: () => [400, { message: 'bad status' }],
+    });
+
+    await executionStatsHandler(env.factory, {}, []);
+    const out = JSON.parse(env.stdout());
+
+    expect(calls.detail).toHaveLength(1);
+    expect(out.errorDetail).toEqual({ errorExecutions: 2, withDetail: 1, withoutDetail: 1 });
+    expect(out.errorClusters[0]).toMatchObject({ node: 'HTTP', executionIds: ['e1'] });
+    expect(env.events.map((e) => e.event)).toContain('execution-stats-detail-unavailable');
+  });
+
   it('should fail loud when the crashed pass fails with anything but 400', async () => {
     const env = makeFakeFactory({ json: true });
     routeExecutions(env, {
@@ -592,6 +611,10 @@ describe('execution stats handler', () => {
 
     expect(calls.detail).toHaveLength(Math.ceil((1 + DETAIL_SLACK) / DETAIL_PAGE_SIZE));
     expect(out.window.detailTruncated).toBe(true);
+    // The warning names the bound that cut the pass, not --limit.
+    const warning = env.events.find((e) => e.event === 'execution-stats-truncated');
+    expect(warning?.payload).toMatchObject({ scope: 'detail', limit: 1 + DETAIL_SLACK });
+    expect(warning?.text).toContain(`bound of ${1 + DETAIL_SLACK} rows`);
   });
 
   it('should warn with scope detail when pass 2 is cut at --limit', async () => {

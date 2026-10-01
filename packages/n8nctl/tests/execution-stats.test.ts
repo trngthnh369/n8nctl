@@ -490,6 +490,13 @@ describe('sanitization', () => {
     [j('login admin:', 'pw-value-sl1', '@db.local failed'), 'pw-value-sl1'],
     [j('oauth ya', '29.', 'abcdefghijklmnopqrstuvwx denied'), j('ya', '29.', 'abcdefghijklmnopqrstuvwx')],
     [j('stripe sk', '_test_', 'abcdefghijklmnop12 denied'), j('sk', '_test_', 'abcdefghijklmnop12')],
+    // Round-3 review: the phrase rule must take the whole value, tail included.
+    [j('login pass', 'word: Abcdefghijklmnop!TAILSECRET9#Zq'), 'TAILSECRET9'],
+    [j('vault sec', 'ret = Abcdefghijklmnopqrs$TAILSEC8'), 'TAILSEC8'],
+    [j('bot tok', 'en: abcdefghijklmnopqrstu@TAILTOK7'), 'TAILTOK7'],
+    [j('login pass', 'word: abcdefghijklmnop1234:TAILPART6'), 'TAILPART6'],
+    ['Incorrect API key provided: "Zk3jH8aPq9LmX2vB7nQwErTy"', 'Zk3jH8aPq9LmX2vB7nQwErTy'],
+    ["API key you've provided: abcdefghijklmnopqrstuvwx", 'abcdefghijklmnopqrstuvwx'],
   ];
 
   it.each(SECRETS)('should remove the secret from message, sample and node label when text is %j', (text, secret) => {
@@ -557,6 +564,21 @@ describe('sanitization', () => {
       expect(performance.now() - start).toBeLessThan(500);
     },
   );
+
+  // Round-3 review: whitespace runs after a secret word and = runs after -u
+  // were quadratic (64 KB took ~22 s and ~4 s).
+  it.each([
+    ['token + spaces', `token${' '.repeat(65_000)}a`],
+    ['token + tabs + colon', `token${'\t'.repeat(65_000)}:`],
+    ['api key + words', `api key${' x'.repeat(32_000)}`],
+    ['-u + equals', `-u${'='.repeat(65_000)}x`],
+    ['-u space + equals', ` -u ${'='.repeat(65_000)}x`],
+  ])('should sanitize a 64 KB adversarial %s input in linear time', (_label, input) => {
+    const start = performance.now();
+    sanitizeText(input);
+
+    expect(performance.now() - start).toBeLessThan(500);
+  });
 
   it('should cap raw input before sanitizing when the text is huge', () => {
     const start = performance.now();

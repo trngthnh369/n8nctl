@@ -5,6 +5,7 @@ import { parsePositiveInt } from '../../lib/util.js';
 import { ApiError, ValidationError } from '../../lib/errors.js';
 import { fetchExecutionWindow, type WindowStopReason } from '../../lib/execution-page.js';
 import {
+  FAILED_BUCKETS,
   MAX_ERROR_CLUSTERS,
   computeExecutionStats,
   extractErrorSignature,
@@ -36,6 +37,8 @@ export const DETAIL_PAGE_SIZE = 20;
 export const STUCK_SCAN_LIMIT = 500;
 /** Margin over the pass-1 failure count for rows that arrive between the passes. */
 export const DETAIL_SLACK = 100;
+/** Detail passes, in a fixed order so requests and the first failure are deterministic. */
+const DETAIL_STATUSES = ['error', 'crashed'] as const;
 
 /** The `window` object of the `--json` output: every key always present. */
 interface StatsWindow {
@@ -134,7 +137,7 @@ export async function executionStatsHandler(
     warnTruncated(factory, 'stuck', STUCK_SCAN_LIMIT, window.stuckScanned);
   }
   if (window.detailTruncated) {
-    warnTruncated(factory, 'detail', limit, detail.fetched);
+    warnTruncated(factory, 'detail', detail.bound, detail.fetched);
   }
   if (detail.crashedUnavailable) {
     factory.io.event(
@@ -159,17 +162,20 @@ async function attachErrorSignatures(
   records: ExecutionRecord[],
   opts: { workflowId?: string; limit: number; since?: number },
 ): Promise<DetailResult> {
-  const result: DetailResult = { pages: 0, truncated: false, fetched: 0, crashedUnavailable: false };
+  const result: DetailResult = { pages: 0, truncated: false, fetched: 0, bound: 0, crashedUnavailable: false };
   const failedById = new Map<string, ExecutionRecord>();
-  const failedPerStatus = new Map<'error' | 'crashed', number>();
+  const failedPerStatus = new Map<string, number>();
   for (const r of records) {
     const bucket = toBucket(r.status);
-    if (bucket !== 'error' && bucket !== 'crashed') continue;
+    if (!FAILED_BUCKETS.has(bucket)) continue;
     failedById.set(r.id, r);
     failedPerStatus.set(bucket, (failedPerStatus.get(bucket) ?? 0) + 1);
   }
 
-  for (const [status, failed] of failedPerStatus) {
+  for (const status of DETAIL_STATUSES) {
+    const failed = failedPerStatus.get(status) ?? 0;
+    if (failed === 0) continue;
+    const bound = Math.min(opts.limit, failed + DETAIL_SLACK);
     let detail;
     try {
       detail = await fetchExecutionWindow(
@@ -180,7 +186,7 @@ async function attachErrorSignatures(
           includeData: true,
           // Rows newer than pass 1 come first; past them, only pass-1 failures
           // can match, so the scan stops after that many plus a margin.
-          limit: Math.min(opts.limit, failed + DETAIL_SLACK),
+          limit: bound,
           since: opts.since,
           pageSize: DETAIL_PAGE_SIZE,
         },
@@ -203,6 +209,7 @@ async function attachErrorSignatures(
       const record = failedById.get(id);
       if (record !== undefined && error !== null) record.error = error;
     }
+    result.bound += bound;
     result.pages += detail.pages;
     result.truncated ||= detail.truncated;
     result.fetched += detail.items.length;
@@ -214,6 +221,8 @@ interface DetailResult {
   pages: number;
   truncated: boolean;
   fetched: number;
+  /** Sum of the per-pass row bounds that ran: pass-1 failures + DETAIL_SLACK, at most --limit. */
+  bound: number;
   crashedUnavailable: boolean;
 }
 
@@ -242,7 +251,7 @@ function warnTruncated(
   const texts = {
     window: `warning: window cut at --limit ${limit} (${fetched} executions scanned); raise --limit or narrow --since for the full window`,
     stuck: `warning: active scan hit its cap of ${limit} per status (${fetched} running/waiting scanned); the stuck list may be incomplete`,
-    detail: `warning: error-detail pass cut at --limit ${limit} (${fetched} failed executions read with data); some failures count as withoutDetail`,
+    detail: `warning: error-detail pass stopped at its bound of ${limit} rows (pass-1 failures + ${DETAIL_SLACK}, at most --limit; ${fetched} read with data); some failures count as withoutDetail`,
   };
   const text = texts[scope];
   factory.io.event('execution-stats-truncated', { level: 'warn', scope, limit, fetched }, text);

@@ -271,8 +271,9 @@ const LOCAL_SECRET_PATTERNS: Array<[RegExp, string]> = [
   [/\b([a-z][a-z0-9+.-]{0,31}:\/\/)[^\s/?#"',;<>]+@/gi, `$1${REDACTED}@`],
   // Schemeless user:password@host (connection strings without a scheme)
   [/(?<![\w.+-])[\w.+-]{1,64}:[^\s@/:"',;<>]{1,128}@(?=[A-Za-z0-9-]+\.[A-Za-z0-9.-]+)/g, `${REDACTED}@`],
-  // curl -u user:password / --user=user:password
-  [/((?:^|\s)(?:-u|--user)[\s=]+)[^\s:]+:\S+/g, `$1${REDACTED}`],
+  // curl -u user:password / --user=user:password (the separator and the user
+  // part share no char, so a run of = cannot backtrack quadratically)
+  [/((?:^|\s)(?:-u|--user)(?:\s+|=))[^\s:=]+:\S+/g, `$1${REDACTED}`],
   // Google OAuth access tokens and Stripe test keys (the shared list has live keys)
   [/\bya29\.[A-Za-z0-9_-]{20,}/g, REDACTED],
   [/\b[rs]k_test_[A-Za-z0-9]{16,}/g, REDACTED],
@@ -346,13 +347,18 @@ const KEY_VALUE_RE = new RegExp(
 /**
  * Free-text secrets with no key=value shape and no known prefix, such as
  * "Incorrect API key provided: <opaque>": a secret word, up to three short
- * words, an optional : or =, then a token-like run of 16+ chars. The length
- * floor keeps ordinary phrases ("token expired", "password must be 8 chars")
- * readable; a long plain word after a secret word is the accepted over-redaction.
+ * words, a separator, an optional quote, then a value whose first 16 chars are
+ * token-like. The whole value is consumed to the next space or delimiter, so a
+ * secret holding ! $ @ : cannot leave its tail behind. The length floor keeps
+ * ordinary phrases ("token expired", "password must be 8 chars") readable; a
+ * long plain word after a secret word is the accepted over-redaction.
+ * Every whitespace run is bounded and the two separator forms do not chain
+ * quantifiers, so a long run of spaces after a secret word stays linear.
  */
 const SECRET_PHRASE_RE = new RegExp(
   String.raw`\b((?:api[ _-]?key|access[ _-]?key|secret[ _-]?key|token|secret|password|passphrase|credentials?|auth(?:entication|orization)?)\b` +
-    String.raw`(?:[ \t]+[A-Za-z]{1,20}){0,3}?[ \t]*[:=]?[ \t]+)(?!\[REDACTED\])[A-Za-z0-9._~+/=-]{16,}`,
+    String.raw`(?:[ \t]{1,4}[A-Za-z']{1,20}){0,3}?(?:[ \t]{0,4}[:=][ \t]{0,4}|[ \t]{1,4})["'\x60]?)` +
+    String.raw`(?=[A-Za-z0-9._~+/=-]{16})[^\s,;&'"\x60\\]+`,
   'gi',
 );
 
