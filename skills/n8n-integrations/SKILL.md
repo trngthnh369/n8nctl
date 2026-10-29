@@ -158,8 +158,9 @@ GET /{hashtag_id}/recent_media?user_id={user_id}&fields=id,caption,timestamp,lik
 
 ```
 # Use Apify LinkedIn Scraper
-POST https://api.apify.com/v2/acts/anchor~linkedin-search/runs
-Body: { "searchTerms": ["keyword"], "maxResults": 50 }
+POST https://api.apify.com/v2/acts/johnvc~linkedin-post-search-api/runs
+Body: { "keywords": ["keyword"], "maxPostsPerKeyword": 50 }
+# Rows: postId, postUrl, text, authorName, datePosted, numLikes, numComments
 ```
 
 ### Threads API
